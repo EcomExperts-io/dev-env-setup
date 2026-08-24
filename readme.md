@@ -95,16 +95,23 @@ download step since it finds itself already there:
 ./bootstrap.sh
 ```
 
-**Windows** — open PowerShell, `cd` into this folder, then:
+**Windows** — just double-click `bootstrap.cmd` in this folder (or run it
+from `cmd`/PowerShell/Explorer, whatever's easiest). It launches
+`bootstrap.ps1` with execution policy bypassed for that one run only —
+nothing persistent or machine-wide changes, and there's no
+"scripts are disabled on this system" prompt to deal with first, no matter
+what this machine's default policy is set to.
 
-```powershell
-.\bootstrap.ps1
-```
-
-If PowerShell blocks the script the first time, run this once and try again:
+If you'd rather invoke `bootstrap.ps1` directly from an open PowerShell
+window instead of using the `.cmd`, that works too — just be aware
+PowerShell's execution policy is a real, separate thing from `bootstrap.cmd`,
+and depending on this machine's default setting it might refuse to run with
+a "scripts are disabled" error. If that happens, run this once (only
+affects the current window, nothing permanent) and try again:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\bootstrap.ps1
 ```
 
 The bootstrap script's only job is making sure Node.js is installed — it
@@ -170,7 +177,7 @@ the fastest fix.
 
 ## Re-running / troubleshooting a single step
 
-Just run `./bootstrap.sh` (or `.\bootstrap.ps1`) again. Every step checks
+Just run `./bootstrap.sh` (or `bootstrap.cmd`/`.\bootstrap.ps1` on Windows) again. Every step checks
 whether it's already done before doing anything, so re-running the whole
 tool is the normal way to retry a step that failed or was skipped.
 
@@ -180,6 +187,7 @@ tool is the normal way to retry a step that failed or was skipped.
 dev-env-setup/
 ├── bootstrap.sh        # macOS/Linux entry point — also self-downloads the repo when run via the one-liner
 ├── bootstrap.ps1        # Windows entry point — same self-download behavior
+├── bootstrap.cmd         # optional double-click launcher for bootstrap.ps1 — bypasses execution policy automatically
 ├── bin/setup.js          # Node CLI entry point (called by both bootstraps)
 └── src/
     ├── index.js          # picks terminal-UI or classic mode, orchestrates the steps below
