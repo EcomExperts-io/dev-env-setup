@@ -27,7 +27,22 @@ $ErrorActionPreference = "Stop"
 
 $RepoOwner = "EcomExperts-io"
 $RepoName = "dev-env-setup"
-$RepoRef = "Main"
+# Piped as `irm .../SomeBranch/bootstrap.ps1 | iex`, this process has no way
+# to ask "which URL did I come from?" - $MyInvocation.MyCommand.Path is
+# $null for piped input, and there's no other hook into the request that
+# fetched this script's own text. So a hardcoded "Main" here would silently
+# re-download and overwrite whatever's on disk with Main's content EVERY
+# time this runs self-download - even when the script text itself was just
+# fetched from a different branch's raw URL a moment ago. That bug is
+# exactly why fixes tested via `.../Develop/bootstrap.ps1 | iex` kept
+# appearing to "not take effect": each run quietly clobbered the local
+# checkout back to Main regardless of which branch the one-liner named.
+# $env:EE_SETUP_REF lets you point self-download at the same branch you're
+# actually testing - set it once before piping in, e.g.:
+#   $env:EE_SETUP_REF = "Develop"; irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.ps1 | iex
+# Nobody outside active development on this tool needs to touch this -
+# leaving it unset keeps the normal, documented "Main" behavior.
+$RepoRef = if ($env:EE_SETUP_REF) { $env:EE_SETUP_REF } else { "Main" }
 $RawBootstrapUrl = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$RepoRef/bootstrap.ps1"
 
 $scriptPath = $MyInvocation.MyCommand.Path

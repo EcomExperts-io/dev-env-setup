@@ -18,7 +18,15 @@ set -euo pipefail
 
 REPO_OWNER="EcomExperts-io"
 REPO_NAME="dev-env-setup"
-REPO_REF="Main"
+# Same self-download-ref override as bootstrap.ps1 (see the comment over
+# there for the full story of why this exists) — piped as
+# `curl ... | bash`, this script has no way to know which branch's raw URL
+# it was actually fetched from, so a hardcoded "Main" here would silently
+# overwrite a local checkout with Main's content on every run regardless of
+# which branch's one-liner you used. Set EE_SETUP_REF to override when
+# testing a branch other than Main:
+#   EE_SETUP_REF=Develop curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh | bash
+REPO_REF="${EE_SETUP_REF:-Main}"
 
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
 info() { printf "  %s\n" "$1"; }

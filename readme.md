@@ -161,6 +161,28 @@ If any step fails, it prints the manual fallback command/link — copy the
 error into ChatGPT first if you're not sure what went wrong, that's usually
 the fastest fix.
 
+## Testing a branch other than Main
+
+The one-liner always self-downloads from `Main` when it needs to fetch a
+local copy — that's correct for every real user, but if you're actively
+developing this tool and piping in `bootstrap.ps1`/`bootstrap.sh` from a
+different branch's raw URL (e.g. `Develop`) to test in-progress changes, the
+script itself has no way to know which branch it was fetched from (a piped
+script can't see its own source URL). Without an override it'll happily
+fetch your branch's `bootstrap.ps1`/`.sh`, then turn around and self-download
+the *rest* of the tool from `Main` anyway — silently overwriting your local
+checkout with old code and making your in-progress fix look like it didn't
+work. Set `EE_SETUP_REF` first to point self-download at the same branch:
+
+```powershell
+$env:EE_SETUP_REF = "Develop"
+irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.ps1 | iex
+```
+
+```bash
+EE_SETUP_REF=Develop curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh | bash
+```
+
 ## Re-running / troubleshooting a single step
 
 Just run `./bootstrap.sh` (or `bootstrap.cmd`/`.\bootstrap.ps1` on Windows) again. Every step checks
