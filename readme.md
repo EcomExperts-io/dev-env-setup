@@ -83,6 +83,13 @@ irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstra
 
 (Branch name is `Main`, capital M — check that's still accurate if this repo's default branch ever changes.)
 
+On Windows, if Node.js (or npm) had to be installed fresh, don't be
+surprised if a second, elevated PowerShell window pops up partway through —
+a window that just installed something doesn't automatically see it on
+PATH, so the script opens a new one that does and keeps going there
+automatically. That's expected, not an error; it only happens on a
+machine that didn't already have Node set up.
+
 ### Running it from a local copy
 
 If you already have this repo downloaded/cloned, you don't need the

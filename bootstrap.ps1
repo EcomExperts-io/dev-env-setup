@@ -15,6 +15,13 @@
 #     this script notices that and downloads a real copy of the repo itself
 #     first (it's public, so no login/token is needed), then carries on
 #     exactly as it would from a real local copy.
+#
+# If something it just installed (Node, npm) isn't visible yet in this
+# specific window - a real thing that happens, since a running process
+# doesn't automatically pick up PATH changes an installer made - it opens a
+# brand-new, elevated PowerShell window and continues the whole setup there
+# instead of leaving you stuck. That's normal, expected behavior, not a
+# crash: the original window hands off and the new one keeps going.
 
 $ErrorActionPreference = "Stop"
 
@@ -47,6 +54,36 @@ function Sync-Path {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
     $env:Path = "$machinePath;$userPath"
+}
+
+function Restart-Setup {
+    # Sync-Path (and the belt-and-suspenders path checks around it) don't
+    # always catch everything a fresh install just changed in this window -
+    # Node showing up but npm (a .cmd shim right next to it, not a real
+    # .exe) still not resolving is a real case seen in testing. Rather than
+    # chasing every individual PATH quirk one at a time, just open a brand
+    # new window and keep going there - a genuinely new process loads PATH
+    # from scratch, so it always sees everything correctly, no guessing
+    # required. Running it elevated too means the rest of the installs in
+    # this window won't hit permission surprises either. EE_SETUP_RELAUNCHED
+    # guards against doing this more than once per run in case something is
+    # genuinely broken - it's set in THIS process's environment before
+    # spawning the child, so the child inherits it automatically.
+    #
+    # Elevation (-Verb RunAs) always opens a separate window - that's an OS
+    # restriction, not a choice here - but if this window is already
+    # elevated, Windows elevates the child silently without prompting again.
+    $env:EE_SETUP_RELAUNCHED = "1"
+    if ($isPiped) {
+        # No real bootstrap.ps1 file on disk to re-run (this process only
+        # ever saw it as text piped into iex) - re-fetch and re-run the
+        # same way it was launched the first time.
+        $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm '$RawBootstrapUrl' | iex")
+    } else {
+        $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$scriptDir\bootstrap.ps1")
+    }
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $argList
+    exit 0
 }
 
 if (-not (Test-Command "node")) {
@@ -98,23 +135,9 @@ if (-not (Test-Command "node")) {
 if ((-not (Test-Command "node")) -and ($env:EE_SETUP_RELAUNCHED -ne "1")) {
     # Node was just installed, but this specific PowerShell process still
     # doesn't see it on PATH. Rather than asking you to close this window
-    # and open a new one, restart the script in a brand-new PowerShell
-    # process right now - a new process loads PATH from scratch, so this
-    # just works instead of leaving you stuck. EE_SETUP_RELAUNCHED guards
-    # against looping forever if something is genuinely broken. (It's set
-    # in THIS process's environment below, before spawning the child, so
-    # the child inherits it automatically - no need to pass it explicitly.)
-    Write-Host "  Node was just installed but this window doesn't see it yet - restarting in a fresh session..." -ForegroundColor Yellow
-    $env:EE_SETUP_RELAUNCHED = "1"
-    if ($isPiped) {
-        # No real bootstrap.ps1 file on disk to re-run (this process only
-        # ever saw it as text piped into iex) - re-fetch and re-run the
-        # same way it was launched the first time.
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm '$RawBootstrapUrl' | iex"
-    } else {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$scriptDir\bootstrap.ps1"
-    }
-    exit $LASTEXITCODE
+    # and open a new one yourself, do it automatically.
+    Write-Host "  Node was just installed but this window doesn't see it yet - opening a fresh window to continue..." -ForegroundColor Yellow
+    Restart-Setup
 }
 
 if (-not (Test-Command "node")) {
@@ -164,18 +187,34 @@ $packageJson = Join-Path $scriptDir "package.json"
 $blessedDir = Join-Path $scriptDir "node_modules\blessed"
 if ((Test-Path $packageJson) -and (-not (Test-Path $blessedDir))) {
     Write-Host "  Installing the terminal UI dependency (one-time)..."
-    Push-Location $scriptDir
-    try {
-        npm install --omit=dev --no-audit --no-fund
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  Note: couldn't install the terminal UI dependency automatically." -ForegroundColor Yellow
-            Write-Host "  The setup tool still works fine - it'll use its plain text mode instead." -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "  Note: couldn't install the terminal UI dependency automatically." -ForegroundColor Yellow
+    Sync-Path
+
+    if ((-not (Test-Command "npm")) -and ($env:EE_SETUP_RELAUNCHED -ne "1")) {
+        # Same class of issue as the Node check above: npm ships right next
+        # to node.exe, but this window having just picked up `node` doesn't
+        # always mean `npm` (a .cmd shim, not a real .exe) resolves too in
+        # that same process - seen in testing right after a fresh install.
+        Write-Host "  npm isn't visible in this window yet - opening a fresh window to continue..." -ForegroundColor Yellow
+        Restart-Setup
+    }
+
+    if (-not (Test-Command "npm")) {
+        Write-Host "  Note: npm still isn't available, even in a fresh window." -ForegroundColor Yellow
         Write-Host "  The setup tool still works fine - it'll use its plain text mode instead." -ForegroundColor Yellow
-    } finally {
-        Pop-Location
+    } else {
+        Push-Location $scriptDir
+        try {
+            npm install --omit=dev --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  Note: npm install didn't succeed (exit code $LASTEXITCODE) - see any output above for why." -ForegroundColor Yellow
+                Write-Host "  The setup tool still works fine - it'll use its plain text mode instead." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host ("  Note: couldn't run npm install - " + $_.Exception.Message) -ForegroundColor Yellow
+            Write-Host "  The setup tool still works fine - it'll use its plain text mode instead." -ForegroundColor Yellow
+        } finally {
+            Pop-Location
+        }
     }
 }
 
