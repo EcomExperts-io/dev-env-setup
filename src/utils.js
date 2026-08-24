@@ -195,24 +195,41 @@ function info(msg) {
 // Shell execution
 // ---------------------------------------------------------------------------
 
+// On Windows, several real commands this tool runs (npm, npx, RubyInstaller's
+// ridk) ship a .cmd file alongside a .ps1 shim of the same name — and
+// PowerShell's own bare-name command resolution prefers the .ps1 over the
+// .cmd, which drags totally ordinary commands like `npm install` under
+// PowerShell's script-execution-policy check even though nothing here is
+// "our" script. -ExecutionPolicy Bypass below covers the common case, but on
+// a machine where IT enforces the policy via Group Policy
+// (MachinePolicy/UserPolicy) — routine on managed company laptops — that
+// scope always wins over any command-line override, and Bypass silently
+// does nothing at all. The real fix is to never let PowerShell resolve the
+// bare name in the first place: explicitly targeting the .cmd file sidesteps
+// script-execution-policy entirely, since running a .cmd through its own
+// interpreter isn't a PowerShell "script" and the policy just doesn't apply
+// to it — regardless of scope, regardless of who set it. (ridk.ps1 itself
+// confirms this is safe: for every subcommand except its two PowerShell-only
+// ones, "enable"/"use", it just forwards straight to ridk.cmd anyway.)
+function forceCmdShims(cmd) {
+  // Only rewrite npm/npx/ridk when they stand alone as their own token (at
+  // the start of the string, or after whitespace/a shell separator like
+  // && ; |, and followed by whitespace/a quote/end-of-string) — never when
+  // they're glued to other characters, e.g. inside a path component like
+  // "...\.npm-global" or "...\npm.cmd", which must be left untouched.
+  return cmd.replace(/(^|[\s;&|(])(npm|npx|ridk)(?=[\s"']|$)(?!\.(?:cmd|ps1|exe))/gi, '$1$2.cmd');
+}
+
 /**
  * Run a command, streaming stdio to the terminal. Returns true on success,
  * false on non-zero exit (never throws) unless opts.throwOnError is true.
  */
 function run(cmd, opts = {}) {
   const shell = isWindows ? 'powershell.exe' : '/bin/bash';
-  // On Windows, several real commands this tool runs (npm, RubyInstaller's
-  // ridk, and others) ship as a .ps1 script alongside their .exe/.cmd
-  // counterpart — and PowerShell's own command resolution prefers that .ps1
-  // over the .cmd when you invoke the bare name, which means execution
-  // policy applies even though nothing here is "our" script. Without
-  // -ExecutionPolicy Bypass here, any machine with a stricter-than-default
-  // policy (common on managed/company machines) fails with "cannot be
-  // loaded because running scripts is disabled on this system" on totally
-  // ordinary commands like `npm install`. -NoProfile avoids a slower start
-  // and any interference from a user's PowerShell profile script.
+  // -NoProfile avoids a slower start and any interference from a user's
+  // PowerShell profile script.
   const shellArgs = isWindows
-    ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd]
+    ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', forceCmdShims(cmd)]
     : ['-c', cmd];
   try {
     // Two independent knobs, since a command can need either or both:

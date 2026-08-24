@@ -157,9 +157,6 @@ function cursorInstalledOnWindows() {
 }
 
 async function installCursorWindows() {
-  // Cursor's raw installer .exe has been unreliable about actually honoring
-  // /S — reports (and this tool's own testing) show it popping up its full
-  // wizard regardless of the flag or which build (user/system) is used.
   // Cursor is also published as a real winget package (Anysphere.Cursor) —
   // winget-pkgs manifests are validated in CI to actually install silently
   // before they're accepted, so it's a more trustworthy source of "the
@@ -180,12 +177,35 @@ async function installCursorWindows() {
     info(`Downloading Cursor ${version}...`);
     const dest = tempInstallerPath(`CursorSetup-x64-${version}.exe`);
     await downloadFile(url, dest);
-    info('Running the installer silently (/S)...');
-    const installResult = runInstaller(dest, ['/S']);
+    // Cursor's Windows installer is Inno Setup-based, not NSIS — it has
+    // never actually recognized /S (that's an NSIS switch); Inno just
+    // ignores unknown switches and falls back to its normal wizard, which
+    // is exactly the "installer opens and waits for a click" symptom this
+    // was causing. Cursor's own enterprise deployment docs confirm the real
+    // switches are the standard Inno Setup silent set below. /LOG writes to
+    // a file we can read back on failure so a silent-install problem shows
+    // an actual reason instead of just "didn't work".
+    const logPath = tempInstallerPath(`cursor-install-${version}.log`);
+    info('Running the installer silently...');
+    const installResult = runInstaller(dest, [
+      '/VERYSILENT',
+      '/SUPPRESSMSGBOXES',
+      '/NORESTART',
+      '/CLOSEAPPLICATIONS',
+      `/LOG=${logPath}`,
+    ]);
     const success = cursorInstalledOnWindows();
-    if (!success && installResult.error) info(`(installer error: ${installResult.error.message || installResult.error})`);
     if (!success) {
-      warn('The installer may have opened its own wizard instead of running silently — this is a known Cursor installer issue.');
+      if (installResult.error) info(`(installer error: ${installResult.error.message || installResult.error})`);
+      try {
+        if (fs.existsSync(logPath)) {
+          const log = fs.readFileSync(logPath, 'utf8').trim();
+          if (log) info(`Installer log (${logPath}):\n${log.split('\n').slice(-20).join('\n')}`);
+        }
+      } catch {
+        // best-effort — not having the log is fine, just less diagnosable
+      }
+      warn('The silent install did not complete — see the log above for why.');
     }
     return { success };
   } catch (err) {
