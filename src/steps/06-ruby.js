@@ -58,7 +58,7 @@ async function installOnWindows() {
     // times, before finally giving up.
     if (commandExists('ridk')) {
       info('Finishing DevKit setup (MSYS2 build tools) — this can take several minutes, output below:');
-      const ridkResult = runWithTimeoutRetry('ridk install 3', {
+      const ridkResult = await runWithTimeoutRetry('ridk install 3', {
         autoConfirmInput: 'Y\n'.repeat(10),
         timeoutMs: 5 * 60 * 1000,
         maxAttempts: 3,

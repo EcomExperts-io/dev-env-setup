@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync, spawnSync } = require('child_process');
+const { execSync, spawnSync, spawn } = require('child_process');
 const readline = require('readline');
 const https = require('https');
 const fs = require('fs');
@@ -286,26 +286,114 @@ function run(cmd, opts = {}) {
  * and re-running the whole command from scratch each time one stalls out —
  * before finally giving up.
  *
+ * This can't just be run() with a timeout, though (an earlier version of
+ * this tried exactly that, and it didn't actually work): run() uses
+ * spawnSync's built-in `timeout`, which only ever signals the ONE process
+ * it directly spawned (powershell.exe on Windows) — not whatever THAT
+ * process spawned underneath it. `ridk install 3` is powershell -> bash ->
+ * pacman -> gpg, several layers deep, and on Windows especially, killing
+ * just the top of that chain leaves everything under it running orphaned
+ * in the background — including whatever pacman/gpg lock file it was
+ * holding, which then makes an immediate retry hang again just as fast, on
+ * the same lock. So this spawns the process itself (async, so it can watch
+ * it directly) and on a stall, kills the WHOLE process tree — `taskkill
+ * /T /F` on Windows, the whole process group via a negative pid on
+ * Unix — before trying again.
+ *
  * opts.timeoutMs is the per-attempt limit (default 5 minutes) and
  * opts.maxAttempts is how many times to retry a stall before giving up
  * (default 3) — so the worst-case total wait is bounded at
  * timeoutMs * maxAttempts, same order of magnitude as one long timeout
  * would have been, just with actual retries instead of one long shot.
- * Returns the same shape run() does; only ever reports timedOut: true if
- * every attempt stalled out.
+ * Returns a Promise of the same result shape run() does; only ever
+ * resolves timedOut: true if every attempt stalled out.
  */
 function runWithTimeoutRetry(cmd, opts = {}) {
   const timeoutMs = opts.timeoutMs || 5 * 60 * 1000;
   const maxAttempts = opts.maxAttempts || 3;
-  let result;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (attempt > 1) {
-      warn(`Still stuck after ${Math.round(timeoutMs / 60000)} min with no response — killing it and trying again (attempt ${attempt}/${maxAttempts})...`);
+  const usingAutoConfirm = typeof opts.autoConfirmInput === 'string';
+  const captureOutput = !!opts.silent && !usingAutoConfirm;
+
+  const shell = isWindows ? 'powershell.exe' : '/bin/bash';
+  const shellArgs = isWindows
+    ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', forceCmdShims(cmd)]
+    : ['-c', cmd];
+  const stdio = usingAutoConfirm ? ['pipe', 'inherit', 'inherit'] : captureOutput ? ['ignore', 'pipe', 'pipe'] : 'inherit';
+
+  function killTree(pid) {
+    if (isWindows) {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      try {
+        process.kill(-pid, 'SIGKILL'); // negative pid = whole process group (needs detached: true below)
+      } catch {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // already gone — fine
+        }
+      }
     }
-    result = run(cmd, { ...opts, timeoutMs });
-    if (!result.timedOut) return result;
   }
-  return result;
+
+  return new Promise((resolve) => {
+    const runAttempt = (attemptNum) => {
+      if (attemptNum > 1) {
+        warn(`Still stuck after ${Math.round(timeoutMs / 60000)} min with no response — killing the whole process tree and trying again (attempt ${attemptNum}/${maxAttempts})...`);
+      }
+
+      let settled = false;
+      let stalledThisAttempt = false;
+      let stdout = '';
+      let stderr = '';
+
+      const child = spawn(shell, shellArgs, {
+        stdio,
+        cwd: opts.cwd,
+        env: { ...process.env, ...(opts.env || {}) },
+        detached: !isWindows,
+      });
+
+      if (captureOutput) {
+        if (child.stdout) child.stdout.on('data', (d) => (stdout += d));
+        if (child.stderr) child.stderr.on('data', (d) => (stderr += d));
+      }
+      if (usingAutoConfirm && child.stdin) {
+        child.stdin.write(opts.autoConfirmInput);
+        child.stdin.end();
+      }
+
+      const timer = setTimeout(() => {
+        stalledThisAttempt = true;
+        killTree(child.pid);
+      }, timeoutMs);
+
+      child.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ success: false, status: -1, error: err });
+      });
+
+      child.on('exit', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        refreshWindowsPath();
+        if (stalledThisAttempt) {
+          if (attemptNum < maxAttempts) {
+            runAttempt(attemptNum + 1);
+          } else {
+            resolve({ success: false, status: code, timedOut: true, stdout, stderr });
+          }
+          return;
+        }
+        resolve({ success: code === 0, status: code, stdout, stderr });
+      });
+    };
+
+    runAttempt(1);
+  });
 }
 
 /**
