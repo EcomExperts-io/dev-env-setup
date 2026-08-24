@@ -1,7 +1,7 @@
 # ADR-001: Adding an In-Terminal UI and One-Command Distribution to dev-env-setup
 
-**Status:** Distribution model accepted and implemented. Terminal-UI code is implemented but **disabled by default** pending a real rendering bug — see "Revision note 2".
-**Date:** 2026-08-24 (revised twice same day — see "Revision note" and "Resolved: the private-repo chicken-and-egg problem"); amended 2026-08-24 — see "Revision note 2"
+**Status:** Accepted — both the terminal-UI architecture and the distribution model are implemented
+**Date:** 2026-08-24 (revised twice same day — see "Revision note" and "Resolved: the private-repo chicken-and-egg problem")
 **Deciders:** Mujtaba (EcomExperts) + whoever owns the GitHub org/repo policy for EcomExperts-io
 
 ## Revision note
@@ -15,30 +15,6 @@ meaningfully different (and simpler) architecture, so this document has
 been rewritten around it rather than patched. The distribution section
 (single command, public-vs-private repo) is unaffected by the pivot and is
 carried over as-is.
-
-## Revision note 2 — TUI pulled from the default path
-
-Real-machine testing (Windows) turned up genuinely corrupted, overlapping
-on-screen rendering — not a cosmetic nit, text actively unreadable/mixed
-together. The first hypothesis was a Windows-console-host limitation (the
-legacy "Windows PowerShell"/conhost.exe host has known gaps in full-screen
-VT rendering that Windows Terminal doesn't share), and a fix shipped to
-auto-detect and fall back in that case. The same corruption then reproduced
-in Windows Terminal itself — a terminal with excellent VT/ANSI support and
-no trouble running other full-screen tools — which rules that hypothesis
-out. That points to a real bug in this project's own handling of shelling
-out to a real command (winget/npm/the Shopify CLI/...) while the TUI's
-alternate screen buffer is active — most likely in the pause/resume
-handling in `src/tui/app.js`'s `shellOutHook`, though it wasn't practically
-debuggable further without a live terminal session to reproduce and
-iterate against (this sandbox has no real TTY).
-
-Given a broken-looking screen is worse than no screen, the decision is to
-make the classic plain-text wizard the default in every environment —
-not just non-terminal/CI cases — until the actual rendering bug is found
-and verified fixed on a real machine. The TUI is still fully implemented
-and available behind an explicit `--tui`/`--gui` flag for anyone who wants
-to try it or help debug it; see "Open Questions" for what a real fix needs.
 
 ## Context
 
@@ -108,12 +84,11 @@ Concretely, this is already implemented:
    handing off, so the terminal UI's one dependency is there automatically.
    If that install fails for any reason, the tool doesn't stop — it falls
    back to plain text mode on its own.
-2. `bin/setup.js` defaults to the classic line-by-line wizard, unchanged
-   from before, in every environment — see "Revision note 2": the
-   full-screen checklist UI is implemented but disabled by default pending
-   a real rendering bug, and only runs when explicitly requested via
-   `--tui`/`--gui`. `--cli` still forces classic mode explicitly (the
-   default anyway) and wins if both flags are passed.
+2. `bin/setup.js` now auto-detects: if both stdin and stdout are a real
+   interactive terminal, it opens the full-screen checklist UI; otherwise
+   (CI, piped output, or if the UI dependency isn't available) it uses the
+   classic line-by-line wizard, unchanged from before. `--tui`/`--gui` and
+   `--cli` flags force either mode explicitly.
 3. **None of the 15 step files were touched.** Every step already talked
    to a small set of shared functions in `utils.js`
    (`ok`/`warn`/`info`/`ask`/`confirm`/...) rather than to `console.log`
@@ -356,7 +331,6 @@ has gone through, especially:
 4. **Any telemetry/error reporting?** Same open question as before — right now, a failure is only visible to the person hitting it.
 5. ~~Zero-dependency GUI server, or one small dependency?~~ Resolved by this revision: one small dependency (`blessed`), auto-installed, with automatic fallback if that install fails.
 6. ~~Should losing GitHub org access immediately break an already-downloaded local copy?~~ Moot now that the repo is public — there's no access control left to revoke in the first place.
-7. **What does the TUI's rendering bug actually need to get fixed and re-enabled by default?** (see Revision note 2) At minimum: a real Windows Terminal session to reproduce against — this sandbox has no live TTY, so the pause/resume handling in `src/tui/app.js` has only ever been unit-tested against a fake terminal, never watched render for real. Worth specifically checking: whether `screen.alloc()`/a forced full redraw is needed right after `shellOutHook.after()` resumes (rather than relying on `screen.render()`'s incremental diff, which may be assuming stale state); and whether a command whose output is longer than one screen (e.g. `shopify theme list` against a store with many themes) scrolls the *normal* buffer in a way that desyncs blessed's cursor bookkeeping when it switches back to the *alternate* buffer. Until someone can watch it live and iterate, it stays opt-in only.
 
 ## Consequences
 

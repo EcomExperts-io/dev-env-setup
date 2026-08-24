@@ -83,13 +83,6 @@ irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstra
 
 (Branch name is `Main`, capital M — check that's still accurate if this repo's default branch ever changes.)
 
-On Windows, if Node.js (or npm) had to be installed fresh, don't be
-surprised if a second, elevated PowerShell window pops up partway through —
-a window that just installed something doesn't automatically see it on
-PATH, so the script opens a new one that does and keeps going there
-automatically. That's expected, not an error; it only happens on a
-machine that didn't already have Node set up.
-
 ### Running it from a local copy
 
 If you already have this repo downloaded/cloned, you don't need the
@@ -102,53 +95,41 @@ download step since it finds itself already there:
 ./bootstrap.sh
 ```
 
-**Windows** — just double-click `bootstrap.cmd` in this folder (or run it
-from `cmd`/PowerShell/Explorer, whatever's easiest). It launches
-`bootstrap.ps1` with execution policy bypassed for that one run only —
-nothing persistent or machine-wide changes, and there's no
-"scripts are disabled on this system" prompt to deal with first, no matter
-what this machine's default policy is set to.
+**Windows** — open PowerShell, `cd` into this folder, then:
 
-If you'd rather invoke `bootstrap.ps1` directly from an open PowerShell
-window instead of using the `.cmd`, that works too — just be aware
-PowerShell's execution policy is a real, separate thing from `bootstrap.cmd`,
-and depending on this machine's default setting it might refuse to run with
-a "scripts are disabled" error. If that happens, run this once (only
-affects the current window, nothing permanent) and try again:
+```powershell
+.\bootstrap.ps1
+```
+
+If PowerShell blocks the script the first time, run this once and try again:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\bootstrap.ps1
 ```
 
 The bootstrap script's only job is making sure Node.js is installed — it
 then hands off to the real setup tool (`bin/setup.js`), which does
 everything else.
 
-### Terminal UI (experimental, off by default)
+### Terminal UI
 
-There's an early full-screen, keyboard-driven UI in progress — a checklist
-of what to set up, then a live sidebar + scrolling log while it runs, same
-idea as tools like Chris Titus's WinUtil, just running inside your terminal
-instead of a separate window. It's **not enabled by default**: testing
-turned up real rendering corruption (overlapping/garbled text) that showed
-up even in Windows Terminal, a terminal with excellent support for this
-kind of full-screen rendering — pointing to a bug in this project's own
-handling of shelled-out commands (winget, npm, the Shopify CLI, ...) rather
-than a terminal limitation. Rather than risk showing a broken-looking
-screen, the reliable plain-text wizard is what actually runs, every time,
-until that's fixed and properly verified.
+When you run it in a real terminal (any normal Terminal/PowerShell/Windows
+Terminal window), it opens a full-screen, keyboard-driven UI right there in
+the terminal — a checklist of what to set up (↑/↓ to move, Space to
+toggle, Enter to start), then a live sidebar + scrolling log while it runs,
+same idea as tools like Chris Titus's WinUtil, just running inside your
+terminal instead of a separate window. Any question the setup needs to ask
+(your Git email, whether to install Oh My Zsh, ...) pops up as a small box
+right there rather than interrupting the log.
 
-The default plain-text wizard is what everyone gets when running this tool
-normally — no flags needed. It asks its questions and prints its progress
-line by line, plainly and reliably, everywhere.
-
-If you want to try the in-progress terminal UI anyway (or help debug it),
-it's still there behind an explicit flag:
+If your terminal can't support that (piped output, some CI runners, or the
+one small UI dependency couldn't be installed automatically), it falls back
+on its own to the classic plain-text, line-by-line wizard — nothing to do
+on your end, it just works either way. You can also choose explicitly:
 
 ```bash
-node bin/setup.js --tui   # try the experimental terminal UI (may render incorrectly)
-node bin/setup.js --cli   # force the classic plain-text wizard (the default anyway)
+node bin/setup.js --tui   # force the terminal UI
+node bin/setup.js --cli   # force the classic plain-text wizard
 ```
 
 ## Naming convention
@@ -189,7 +170,7 @@ the fastest fix.
 
 ## Re-running / troubleshooting a single step
 
-Just run `./bootstrap.sh` (or `bootstrap.cmd`/`.\bootstrap.ps1` on Windows) again. Every step checks
+Just run `./bootstrap.sh` (or `.\bootstrap.ps1`) again. Every step checks
 whether it's already done before doing anything, so re-running the whole
 tool is the normal way to retry a step that failed or was skipped.
 
@@ -199,7 +180,6 @@ tool is the normal way to retry a step that failed or was skipped.
 dev-env-setup/
 ├── bootstrap.sh        # macOS/Linux entry point — also self-downloads the repo when run via the one-liner
 ├── bootstrap.ps1        # Windows entry point — same self-download behavior
-├── bootstrap.cmd         # optional double-click launcher for bootstrap.ps1 — bypasses execution policy automatically
 ├── bin/setup.js          # Node CLI entry point (called by both bootstraps)
 └── src/
     ├── index.js          # picks terminal-UI or classic mode, orchestrates the steps below

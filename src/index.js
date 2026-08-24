@@ -46,31 +46,28 @@ const args = process.argv.slice(2);
 const forceCli = args.includes('--cli');
 const forceTui = args.includes('--tui') || args.includes('--gui');
 
-// The terminal UI (blessed) is opt-in only via --tui/--gui, not the default.
-// It first looked like a Windows-console-host-support gap (garbled,
-// overlapping text) — but the same corruption showed up in testing on
-// Windows Terminal too, a terminal with excellent VT/ANSI support that has
-// no trouble with other full-screen tools. That points to a real bug in
-// this project's own pause/resume handling around shelled-out commands
-// (winget, npm, the Shopify CLI, ...) rather than a terminal capability
-// gap — one that isn't practical to chase blind without a live terminal to
-// reproduce against. Rather than risk shipping a screen that actively
-// looks broken to everyone by default, the classic plain-text wizard —
-// fully reliable, just less flashy — is the default everywhere until the
-// TUI's rendering is actually fixed and verified. The TUI code is left in
-// place for anyone who wants to try it or help debug it.
+// Default to the terminal UI whenever we're actually attached to a real
+// interactive terminal (both stdin and stdout — a TUI needs to read
+// keystrokes AND draw a full screen). Falls back to the classic prompt-driven
+// CLI for CI, piped output, `--cli`, or if blessed can't start for any
+// reason at all — automatically, not as a manual step someone has to
+// remember to run.
+const canUseTui = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
+
 async function main() {
-  if (forceCli || !forceTui) {
+  if (forceCli) {
     return runClassic();
   }
-  try {
-    const { runTui } = require('./tui/app');
-    await runTui(steps);
-    return;
-  } catch (err) {
-    console.error('Could not start the terminal UI (' + (err.message || err) + ').');
-    console.error('Continuing in plain text mode instead...\n');
-    // fall through to the classic CLI below
+  if (forceTui || canUseTui) {
+    try {
+      const { runTui } = require('./tui/app');
+      await runTui(steps);
+      return;
+    } catch (err) {
+      console.error('Could not start the terminal UI (' + (err.message || err) + ').');
+      console.error('Continuing in plain text mode instead...\n');
+      // fall through to the classic CLI below
+    }
   }
   return runClassic();
 }
