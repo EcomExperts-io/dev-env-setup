@@ -2,6 +2,34 @@
 
 const { runStep, refreshWindowsPath } = require('./utils');
 
+// Last-resort safety net: if something genuinely unexpected slips past
+// every step's own error handling (a rejected promise nobody awaited, a
+// truly unanticipated exception), Node's default behavior is to print a
+// stack trace and exit — but on Windows, whatever's hosting this process
+// doesn't always keep that output on screen long enough to read before the
+// window's done with it. Print it plainly and pause on a real keypress
+// first, so "the tool just vanished with no error" (confusing and, worse,
+// looks like nothing went wrong) can't happen — there's always at least
+// one clear line explaining what broke and that a re-run is the fix, since
+// every step here is designed to be safely re-run from the top.
+function crashSafely(label, err) {
+  console.error(`\n${label}:`, (err && err.stack) || err);
+  console.error('\nThis was unexpected — every step here is safe to re-run, so running the tool again is the fix.');
+  try {
+    require('child_process').spawnSync(
+      process.platform === 'win32' ? 'powershell.exe' : '/bin/sh',
+      process.platform === 'win32' ? ['-NoProfile', '-Command', 'Read-Host "Press Enter to close"'] : ['-c', 'read _ 2>/dev/null || true'],
+      { stdio: 'inherit' }
+    );
+  } catch {
+    // best-effort — worst case the window closes without the pause
+  }
+  process.exit(1);
+}
+
+process.on('uncaughtException', (err) => crashSafely('Unexpected error', err));
+process.on('unhandledRejection', (err) => crashSafely('Unexpected error (unhandled promise rejection)', err));
+
 // Make sure we start with the freshest possible view of PATH — the
 // bootstrap script already does this before handing off, but this covers
 // anyone who runs `node bin/setup.js` directly.
@@ -36,7 +64,4 @@ async function main() {
   process.exit(anyFailed ? 1 : 0);
 }
 
-main().catch((err) => {
-  console.error('\nUnexpected error:', err);
-  process.exit(1);
-});
+main().catch((err) => crashSafely('Unexpected error', err));

@@ -397,43 +397,69 @@ function ensureWinget() {
   if (wingetBootstrapAttempted) return commandExists('winget');
   wingetBootstrapAttempted = true;
 
-  info('winget isn\'t available on this machine — bootstrapping it via Microsoft\'s official WinGet PowerShell module (no Microsoft Store needed)...');
+  // This whole attempt is a nice-to-have, not something any step actually
+  // depends on — every caller already has its own fallback for winget being
+  // unavailable (a direct-download install, or in Slack's case, opening the
+  // browser page). So no matter what goes wrong in here — PSGallery being
+  // unreachable, a cmdlet throwing, anything — this must degrade back to
+  // "winget still isn't available" and let the caller's existing fallback
+  // handle it, never take down the rest of the tool with it.
+  try {
+    info('winget isn\'t available on this machine — bootstrapping it via Microsoft\'s official WinGet PowerShell module (no Microsoft Store needed)...');
 
-  // Try the all-users (machine-wide) install first — needs this process to
-  // already be elevated, which it normally is by the time a Windows step
-  // gets this far. TLS 1.2 is forced explicitly because PowerShell 5.1 on
-  // an older Windows image doesn't always default to it, which otherwise
-  // fails silently against PSGallery/NuGet with no useful error at all.
-  const elevatedScript = [
-    "$ProgressPreference = 'SilentlyContinue'",
-    '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12',
-    "Install-PackageProvider -Name NuGet -Force -Scope AllUsers | Out-Null",
-    "Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope AllUsers | Out-Null",
-    'Repair-WinGetPackageManager -AllUsers',
-  ].join('; ');
-  run(elevatedScript, { timeoutMs: 5 * 60 * 1000 });
-  refreshWindowsPath();
+    // Building blocks shared by both attempts below.
+    //  - Trusting PSGallery up front avoids Install-Module's "Untrusted
+    //    repository, are you sure? [Y/N]" confirmation — without this, that
+    //    prompt just sits there forever on inherited stdio with nothing
+    //    (and nobody) answering it, since this isn't an interactive step.
+    //  - TLS 1.2 is forced explicitly because PowerShell 5.1 on an older
+    //    Windows image doesn't always default to it, which otherwise fails
+    //    silently against PSGallery/NuGet with no useful error at all.
+    //  - The whole thing is wrapped in its own try/catch so a terminating
+    //    error partway through (e.g. NuGet provider install failing) prints
+    //    one clear warning line instead of the runaway PowerShell error
+    //    output a semicolon-chained -Command would otherwise produce.
+    const scriptFor = (scope) =>
+      [
+        "$ProgressPreference = 'SilentlyContinue'",
+        'try {',
+        '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12',
+        `  Install-PackageProvider -Name NuGet -Force -Scope ${scope} -ErrorAction Stop | Out-Null`,
+        "  if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue | Where-Object { $_.InstallationPolicy -eq 'Trusted' })) {",
+        "    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue",
+        '  }',
+        `  Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope ${scope} -Confirm:$false -ErrorAction Stop | Out-Null`,
+        scope === 'AllUsers' ? '  Repair-WinGetPackageManager -AllUsers' : '  Repair-WinGetPackageManager',
+        '} catch {',
+        '  Write-Warning $_.Exception.Message',
+        '}',
+      ].join('\n');
 
-  if (!commandExists('winget')) {
-    // Not elevated (or the machine-wide attempt otherwise failed) — retry
-    // entirely per-user, which needs no admin rights at all.
-    const userScript = [
-      "$ProgressPreference = 'SilentlyContinue'",
-      '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12',
-      "Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null",
-      "Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser | Out-Null",
-      'Repair-WinGetPackageManager',
-    ].join('; ');
-    run(userScript, { timeoutMs: 5 * 60 * 1000 });
+    // Try the all-users (machine-wide) install first — needs this process
+    // to already be elevated, which it normally is by the time a Windows
+    // step gets this far. A shorter, bounded timeout here on purpose: this
+    // is a bonus setup step, not one worth tying up the whole tool over if
+    // something about this specific machine/network makes it hang.
+    run(scriptFor('AllUsers'), { timeoutMs: 3 * 60 * 1000 });
     refreshWindowsPath();
-  }
 
-  if (commandExists('winget')) {
-    ok('winget is now available.');
-    return true;
+    if (!commandExists('winget')) {
+      // Not elevated (or the machine-wide attempt otherwise failed) — retry
+      // entirely per-user, which needs no admin rights at all.
+      run(scriptFor('CurrentUser'), { timeoutMs: 3 * 60 * 1000 });
+      refreshWindowsPath();
+    }
+
+    if (commandExists('winget')) {
+      ok('winget is now available.');
+      return true;
+    }
+    warn('Could not bootstrap winget on this machine — steps that use it will fall back to their own direct-download paths.');
+    return false;
+  } catch (err) {
+    warn(`Bootstrapping winget hit an unexpected error (${err && err.message ? err.message : err}) — steps that use it will fall back to their own direct-download paths.`);
+    return false;
   }
-  warn('Could not bootstrap winget on this machine — steps that use it will fall back to their own direct-download paths.');
-  return false;
 }
 
 // A fresh/minimal Linux install (a bare VM image, for instance) may not
