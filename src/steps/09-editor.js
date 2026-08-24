@@ -10,6 +10,7 @@ const {
   ask,
   run,
   commandExists,
+  ensureWinget,
   downloadFile,
   fetchJson,
   runInstaller,
@@ -33,7 +34,7 @@ function openUrl(url) {
 // ---------------------------------------------------------------------------
 
 async function installVSCodeWindows() {
-  if (commandExists('winget')) {
+  if (ensureWinget()) {
     info('Trying winget...');
     const result = run(
       'winget install --id Microsoft.VisualStudioCode -e --source winget --accept-package-agreements --accept-source-agreements'
@@ -162,7 +163,7 @@ async function installCursorWindows() {
   // before they're accepted, so it's a more trustworthy source of "the
   // correct silent switch" than guessing flags against the installer
   // ourselves. Try that first.
-  if (commandExists('winget')) {
+  if (ensureWinget()) {
     info('Trying winget...');
     const result = run(
       'winget install --id Anysphere.Cursor -e --source winget --accept-package-agreements --accept-source-agreements'
@@ -391,7 +392,7 @@ function isClaudeDesktopInstalledWindows() {
 }
 
 async function installClaudeDesktopWindows() {
-  if (commandExists('winget')) {
+  if (ensureWinget()) {
     info('Trying winget...');
     const result = run(
       'winget install --id Anthropic.Claude -e --source winget --accept-package-agreements --accept-source-agreements'

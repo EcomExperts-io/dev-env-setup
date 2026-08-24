@@ -6,6 +6,7 @@ const {
   info,
   run,
   commandExists,
+  ensureWinget,
   downloadFile,
   fetchJson,
   runInstaller,
@@ -14,7 +15,7 @@ const {
 const { isMac, isWindows, isLinux, detectLinuxPackageManager } = require('../platform');
 
 async function installOnWindows() {
-  if (commandExists('winget')) {
+  if (ensureWinget()) {
     info('Trying winget...');
     const result = run(
       'winget install --id RubyInstallerTeam.RubyWithDevKit -e --source winget --accept-package-agreements --accept-source-agreements'

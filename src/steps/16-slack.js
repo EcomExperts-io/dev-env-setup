@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ok, warn, info, run, commandExists, openUrl } = require('../utils');
+const { ok, warn, info, run, commandExists, ensureWinget, openUrl } = require('../utils');
 const { isMac, isWindows, homedir } = require('../platform');
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ function slackInstalledOnWindows() {
 }
 
 async function installSlackWindows() {
-  if (commandExists('winget')) {
+  if (ensureWinget()) {
     info('Trying winget...');
     const result = run(
       'winget install --id SlackTechnologies.Slack -e --source winget --accept-package-agreements --accept-source-agreements'

@@ -6,6 +6,7 @@ const {
   info,
   run,
   commandExists,
+  ensureWinget,
   downloadFile,
   fetchJson,
   runInstaller,
@@ -15,7 +16,7 @@ const { isMac, isWindows, isLinux, detectLinuxPackageManager } = require('../pla
 
 async function installOnWindows() {
   // Try winget first — it's fastest when it works.
-  if (commandExists('winget')) {
+  if (ensureWinget()) {
     info('Trying winget...');
     const result = run(
       'winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements'

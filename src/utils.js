@@ -335,6 +335,72 @@ function commandExists(cmd) {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
+// Every Windows step that installs something (Git, Ruby, VS Code, Cursor,
+// the Claude desktop app, Slack) tries winget first, because a winget
+// package is independently validated by winget-pkgs' own CI to actually
+// install silently — a much safer bet than guessing an installer's real
+// flags ourselves. All of that only helps on a machine that actually HAS
+// winget, though, and plenty don't: it ships via the Microsoft Store app
+// ("App Installer"), so it's commonly missing on a managed/locked-down
+// company machine with Store access restricted, and on Windows Sandbox,
+// whose minimal image doesn't include it either. Rather than let every one
+// of those steps quietly fall back to a less-reliable direct-download path
+// (or, for something like Slack which has no such fallback at all, give up
+// and open a browser tab) on any machine like that, bootstrap winget itself
+// first — Microsoft's own currently-documented method for exactly this
+// (see "Install winget on Windows Sandbox" in their WinGet docs), using the
+// official Microsoft.WinGet.Client PowerShell module instead of us chasing
+// the right msixbundle/dependency/license files by hand. Memoized so only
+// the first Windows step that needs winget pays for the bootstrap attempt;
+// everything after it just sees winget already there (or already given up
+// on, if it genuinely isn't reachable on this machine/network).
+let wingetBootstrapAttempted = false;
+
+function ensureWinget() {
+  if (!isWindows) return false;
+  if (commandExists('winget')) return true;
+  if (wingetBootstrapAttempted) return commandExists('winget');
+  wingetBootstrapAttempted = true;
+
+  info('winget isn\'t available on this machine — bootstrapping it via Microsoft\'s official WinGet PowerShell module (no Microsoft Store needed)...');
+
+  // Try the all-users (machine-wide) install first — needs this process to
+  // already be elevated, which it normally is by the time a Windows step
+  // gets this far. TLS 1.2 is forced explicitly because PowerShell 5.1 on
+  // an older Windows image doesn't always default to it, which otherwise
+  // fails silently against PSGallery/NuGet with no useful error at all.
+  const elevatedScript = [
+    "$ProgressPreference = 'SilentlyContinue'",
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12',
+    "Install-PackageProvider -Name NuGet -Force -Scope AllUsers | Out-Null",
+    "Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope AllUsers | Out-Null",
+    'Repair-WinGetPackageManager -AllUsers',
+  ].join('; ');
+  run(elevatedScript, { timeoutMs: 5 * 60 * 1000 });
+  refreshWindowsPath();
+
+  if (!commandExists('winget')) {
+    // Not elevated (or the machine-wide attempt otherwise failed) — retry
+    // entirely per-user, which needs no admin rights at all.
+    const userScript = [
+      "$ProgressPreference = 'SilentlyContinue'",
+      '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12',
+      "Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null",
+      "Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser | Out-Null",
+      'Repair-WinGetPackageManager',
+    ].join('; ');
+    run(userScript, { timeoutMs: 5 * 60 * 1000 });
+    refreshWindowsPath();
+  }
+
+  if (commandExists('winget')) {
+    ok('winget is now available.');
+    return true;
+  }
+  warn('Could not bootstrap winget on this machine — steps that use it will fall back to their own direct-download paths.');
+  return false;
+}
+
 // A fresh/minimal Linux install (a bare VM image, for instance) may not
 // have curl preinstalled at all — bootstrap.sh now handles that for the
 // Node.js install itself, but several later steps (Claude Code CLI, Oh My
@@ -590,6 +656,7 @@ module.exports = {
   openUrl,
   capture,
   commandExists,
+  ensureWinget,
   refreshWindowsPath,
   addDirToWindowsPath,
   addDirToUnixPath,
