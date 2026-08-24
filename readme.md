@@ -1,0 +1,217 @@
+EcomExperts Dev Environment Setup
+
+One command to get a new machine (macOS, Windows, or Linux) ready for
+EcomExperts development — no more retyping the onboarding doc by hand every
+time you're on a new laptop.
+
+Before you start, it's worth watching the two intro videos:
+
+
+
+
+
+https://vimeo.com/901241912?share=copy
+
+
+
+https://vimeo.com/901266123?share=copy
+
+What this does
+
+Installs and configures, in order, checking first and skipping anything you
+already have:
+
+
+
+
+
+Homebrew (macOS only)
+
+
+
+Node.js & npm
+
+
+
+Git
+
+
+
+Ruby
+
+
+
+Shopify CLI — and a real login check: since it needs a store to
+
+verify against, this runs shopify theme list --store=<store> (your own
+ store, or EcomExperts' shared verification store if you leave it blank),
+ which forces the browser-based Shopify login if you aren't logged in yet,
+ and won't move on until it actually succeeds (or you explicitly skip it)
+
+
+
+Your choice of coding tools — pick any combination (multi-select prompt):
+
+Visual Studio Code, Cursor, and/or Claude Code (installs both the CLI and
+ the desktop app)
+
+
+
+The Documents/EcomExperts folder structure (Clients, GitTemplates,
+
+LintingRules, GithubKeys, Packages)
+
+
+
+Your Git identity (name + email), a GitHub SSH key, and a **compulsory
+
+verification loop**: it walks you through adding the key on
+ github.com step by step, then actually tests both that GitHub accepts the
+ key and that your account has access to the EcomExperts-io org — and
+ won't move on until both pass (or you explicitly skip)
+
+
+
+Husky
+
+
+
+CloneSetUp.sh (cloned from EcomExperts-io/pipeline-rules), wired
+
+onto your PATH so you can run it from anywhere. On macOS/Linux/Git Bash:
+  CloneSetUp.sh <repo-url>. On Windows PowerShell/cmd, both
+  CloneSetUp <repo-url> and CloneSetUp.sh <repo-url> work — a
+  CloneSetUp.cmd wrapper handles the first form, and a small PowerShell
+  profile shortcut handles the second (Windows has no built-in way to
+  execute a .sh file directly; without that shortcut, PowerShell would
+  just try to open the file instead of running it)
+
+
+
+The shared ESLint / theme-check linting rules
+
+
+
+Oh My Zsh (optional, macOS/Linux only)
+
+It's safe to run more than once — completed steps are detected and skipped,
+so if something fails partway through (no internet, a permission prompt you
+missed) you can just run it again and it'll pick up where it left off.
+
+The GitHub and Shopify steps are deliberately stricter than the rest: both
+require a real human action (adding a key on github.com, completing a
+browser login) that no script can do on your behalf, so instead of testing
+once and moving on regardless, they explain exactly what to do, wait for
+you to confirm you've done it, test for real, and loop back with specific
+guidance if it didn't work — rather than silently continuing and letting
+the failure surface confusingly several steps later.
+
+Quickstart
+
+macOS / Linux — open Terminal, cd into this folder, then:
+
+./bootstrap.sh
+
+Windows — open PowerShell, cd into this folder, then:
+
+.\bootstrap.ps1
+
+If PowerShell blocks the script the first time, run this once and try again:
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+The bootstrap script's only job is making sure Node.js is installed — it
+then hands off to the real setup tool (bin/setup.js), which does
+everything else.
+
+Terminal UI
+
+When you run it in a real terminal (any normal Terminal/PowerShell/Windows
+Terminal window), it opens a full-screen, keyboard-driven UI right there in
+the terminal — a checklist of what to set up (↑/↓ to move, Space to
+toggle, Enter to start), then a live sidebar + scrolling log while it runs,
+same idea as tools like Chris Titus's WinUtil, just running inside your
+terminal instead of a separate window. Any question the setup needs to ask
+(your Git email, whether to install Oh My Zsh, ...) pops up as a small box
+right there rather than interrupting the log.
+
+If your terminal can't support that (piped output, some CI runners, or the
+one small UI dependency couldn't be installed automatically), it falls back
+on its own to the classic plain-text, line-by-line wizard — nothing to do
+on your end, it just works either way. You can also choose explicitly:
+
+node bin/setup.js --tui   # force the terminal UI
+node bin/setup.js --cli   # force the classic plain-text wizard
+
+
+
+Naming convention
+
+EcomExperts repos and folders use PascalCase — e.g. MyNewRepo, not
+my-new-repo, my_new_repo, or mynewrepo. Misnaming things breaks
+tooling that expects the exact convention.
+
+Things this can't fully automate
+
+A few steps depend on manual confirmation or on internal links that only
+make sense once you're mid-setup — the tool will pause, tell you exactly
+what to do, and wait for you:
+
+
+
+
+
+Adding your SSH public key to your GitHub account (the tool copies it to
+your clipboard, prints step-by-step instructions, and won't move on until
+it verifies both the key and your EcomExperts-io org access)
+
+
+
+Logging into Shopify in your browser when the CLI prompts for it (the tool
+triggers this automatically and waits for it to complete)
+
+
+
+Downloading EcomExperts' recommended VS Code build if the automatic
+install path isn't available on your machine
+
+
+
+Cursor or the Claude desktop app, only if the download sources they rely on
+ever move or go down (the tool opens the official download page as a
+fallback — this shouldn't normally happen)
+
+
+
+Windows Ruby installs when winget isn't available (RubyInstaller needs
+a manual download + wizard)
+
+If any step fails, it prints the manual fallback command/link — copy the
+error into ChatGPT first if you're not sure what went wrong, that's usually
+the fastest fix.
+
+Re-running / troubleshooting a single step
+
+Just run ./bootstrap.sh (or .\bootstrap.ps1) again. Every step checks
+whether it's already done before doing anything, so re-running the whole
+tool is the normal way to retry a step that failed or was skipped.
+
+Project layout
+
+dev-env-setup/
+├── bootstrap.sh        # macOS/Linux entry point
+├── bootstrap.ps1        # Windows entry point
+├── bin/setup.js          # Node CLI entry point (called by both bootstraps)
+└── src/
+    ├── index.js          # picks terminal-UI or classic mode, orchestrates the steps below
+    ├── steps/            # one file per setup step, in run order — unaware of which mode is active
+    ├── tui/              # the full-screen terminal UI (checklist + live run screen)
+    ├── config.js         # folder paths, repo URLs, shared constants
+    ├── platform.js       # OS detection
+    └── utils.js          # exec/prompt/logging helpers, pluggable so tui/ can take over presentation
+
+Almost no npm dependencies are required to run this: it's plain Node.js plus
+one small package (blessed) for the terminal UI, which the bootstrap
+scripts install automatically the first time. Every step's actual install
+logic — the part that took real work to get right — has zero dependencies
+either way; blessed only touches how things are displayed.
