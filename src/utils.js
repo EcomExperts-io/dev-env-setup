@@ -274,6 +274,41 @@ function run(cmd, opts = {}) {
 }
 
 /**
+ * Like run(), but for a command that isn't waiting on a person — something
+ * fully unattended (no ask()/prompt in play) that can still occasionally
+ * just hang, e.g. RubyInstaller's DevKit setup stalling out mid-way through
+ * verifying MSYS2/pacman package signatures against a slow or unreachable
+ * keyserver. A single long timeout doesn't help there: whatever it's stuck
+ * on typically doesn't resolve itself no matter how long you wait, but
+ * killing it and starting clean often does, since it's usually a transient
+ * network hiccup rather than a real, permanent failure. So instead of one
+ * opts.timeoutMs-long wait, this makes several shorter attempts — killing
+ * and re-running the whole command from scratch each time one stalls out —
+ * before finally giving up.
+ *
+ * opts.timeoutMs is the per-attempt limit (default 5 minutes) and
+ * opts.maxAttempts is how many times to retry a stall before giving up
+ * (default 3) — so the worst-case total wait is bounded at
+ * timeoutMs * maxAttempts, same order of magnitude as one long timeout
+ * would have been, just with actual retries instead of one long shot.
+ * Returns the same shape run() does; only ever reports timedOut: true if
+ * every attempt stalled out.
+ */
+function runWithTimeoutRetry(cmd, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 5 * 60 * 1000;
+  const maxAttempts = opts.maxAttempts || 3;
+  let result;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      warn(`Still stuck after ${Math.round(timeoutMs / 60000)} min with no response — killing it and trying again (attempt ${attempt}/${maxAttempts})...`);
+    }
+    result = run(cmd, { ...opts, timeoutMs });
+    if (!result.timedOut) return result;
+  }
+  return result;
+}
+
+/**
  * Run a command by invoking the executable directly with an argv array —
  * no shell in between. This matters on Windows specifically: PowerShell's
  * `-Command "..."` re-tokenizes the whole string, and an empty quoted
@@ -652,6 +687,7 @@ module.exports = {
   fail,
   info,
   run,
+  runWithTimeoutRetry,
   runDirect,
   openUrl,
   capture,

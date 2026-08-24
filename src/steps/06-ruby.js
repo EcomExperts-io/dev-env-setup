@@ -5,6 +5,7 @@ const {
   warn,
   info,
   run,
+  runWithTimeoutRetry,
   commandExists,
   ensureWinget,
   downloadFile,
@@ -48,18 +49,22 @@ async function installOnWindows() {
     // components to set up. `ridk install 3` picks that option (MSYS2 +
     // the MinGW dev toolchain) without the interactive menu, but the
     // underlying pacman step can still throw up its own "Proceed? [Y/n]"
-    // confirmation and can take a while downloading the toolchain — so
-    // this feeds an automatic "yes", keeps output visible instead of
-    // hiding it, and gives up after 15 minutes rather than hanging forever
-    // if something really is stuck waiting on input we didn't anticipate.
+    // confirmation, and in practice it's the single most likely place in
+    // this whole tool to just sit there — pacman verifying package
+    // signatures against a slow or unreachable keyserver, with nothing
+    // wrong that waiting longer will fix. A fresh attempt usually clears
+    // it, so instead of one long wait, this kills and re-runs the whole
+    // command from scratch if 5 minutes pass with no response, up to 3
+    // times, before finally giving up.
     if (commandExists('ridk')) {
       info('Finishing DevKit setup (MSYS2 build tools) — this can take several minutes, output below:');
-      const ridkResult = run('ridk install 3', {
+      const ridkResult = runWithTimeoutRetry('ridk install 3', {
         autoConfirmInput: 'Y\n'.repeat(10),
-        timeoutMs: 15 * 60 * 1000,
+        timeoutMs: 5 * 60 * 1000,
+        maxAttempts: 3,
       });
       if (ridkResult.timedOut) {
-        warn('DevKit build-tools setup was still running after 15 minutes, so it was stopped.');
+        warn('DevKit build-tools setup was still stalling after 3 attempts, so it was stopped.');
         info('Ruby itself is installed and usable. If a later step fails needing to compile a native gem,');
         info('open a new terminal and run: ridk install 3');
       } else if (!ridkResult.success) {

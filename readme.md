@@ -43,10 +43,14 @@ already have:
     just try to *open* the file instead of running it)
 11. The shared ESLint / theme-check linting rules
 12. Slack desktop app
-13. Time Doctor desktop app — the one exception to full automation (see
-    below); it just checks whether it's already installed and, if not,
-    opens the download page for you
-14. Oh My Zsh (optional, macOS/Linux only)
+13. Oh My Zsh (optional, macOS/Linux only)
+
+Time Doctor isn't part of this tool. It has no automatable install path on
+any OS — no winget/Homebrew/snap package, and its downloads are gated behind
+signing into your company Time Doctor account first, so a step here could
+only ever open a browser tab for you to do it manually anyway. That's not
+worth a dedicated step; install it yourself once from
+https://www.timedoctor.com/download.
 
 It's safe to run more than once — completed steps are detected and skipped,
 so if something fails partway through (no internet, a permission prompt you
@@ -147,15 +151,6 @@ what to do, and wait for you:
 - Cursor or the Claude desktop app, only if the download sources they rely on
   ever move or go down (the tool opens the official download page as a
   fallback — this shouldn't normally happen)
-- Windows Ruby installs when `winget` isn't available (RubyInstaller needs
-  a manual download + wizard)
-- Time Doctor, on every machine: unlike everything else in this list, there's
-  no winget package, Homebrew cask, or snap for it, and its downloads are
-  gated behind signing into your company Time Doctor account first — there's
-  no plain installer link a script can fetch, and the vendor documents no
-  silent-install flag. The tool checks whether it's already installed and,
-  if not, opens the download page for you to sign in and install by hand;
-  re-run the tool afterwards and it'll detect it and skip
 
 If any step fails, it prints the manual fallback command/link — copy the
 error into ChatGPT first if you're not sure what went wrong, that's usually

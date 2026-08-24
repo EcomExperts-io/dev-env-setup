@@ -22,7 +22,6 @@ const steps = [
   ['CloneSetUp.sh', require('./steps/12-clone-setup')],
   ['Linting rules', require('./steps/13-linting-rules')],
   ['Slack', require('./steps/16-slack')],
-  ['Time Doctor', require('./steps/17-timedoctor')],
   ['Oh My Zsh', require('./steps/14-oh-my-zsh')],
   ['Summary', require('./steps/15-summary')],
 ];
