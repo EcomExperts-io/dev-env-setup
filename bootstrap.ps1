@@ -40,6 +40,26 @@ if (-not $isPiped) {
 # Make sure the console can render the checkmarks/arrows the setup tool prints.
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
+# Belt-and-suspenders: relax script execution for the rest of THIS session
+# before anything else runs, so nothing downstream trips over "running
+# scripts is disabled on this system" — not even something we haven't
+# thought to route around individually. -Scope Process only ever affects
+# this one process tree, is undone automatically the moment this window
+# closes, and never touches the machine's real policy. It's stored in
+# $env:PSExecutionPolicyPreference, an ordinary environment variable, so it
+# carries down into every child process this script spawns too (Node, and
+# every powershell.exe that Node itself shells out to) — without anyone
+# needing to remember to pass -ExecutionPolicy Bypass by hand every time.
+# The one thing this can't do anything about is a policy locked down by
+# Group Policy (MachinePolicy/UserPolicy) on a managed company machine —
+# that always wins over any command-line or in-session override, by design,
+# no matter where it's set. On a machine like that, this line is a silent
+# no-op, which is exactly why the specific commands most likely to hit a
+# GPO-restricted machine (npm, ridk) are also hardened separately in
+# src/utils.js to route around PowerShell's script check entirely rather
+# than depending on this.
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
+
 Write-Host "EcomExperts dev-setup - bootstrap" -ForegroundColor Cyan
 
 function Test-Command($name) {
