@@ -9,6 +9,22 @@ const path = require('path');
 const c = require('./colors');
 
 const isWindows = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
+
+// ---------------------------------------------------------------------------
+// Open a URL in the default browser
+// ---------------------------------------------------------------------------
+//
+// Shared fallback used by any step that needs to hand the user off to a
+// download page it couldn't fully automate (e.g. a vendor with no
+// winget/brew/snap package). Kept here so new steps don't have to redefine
+// their own copy — 09-editor.js predates this and still carries its own
+// local version, left untouched since it's already tested.
+function openUrl(url) {
+  if (isMac) run(`open "${url}"`, { silent: true });
+  else if (isWindows) run(`Start-Process "${url}"`, { silent: true });
+  else run(`xdg-open "${url}" 2>/dev/null`, { silent: true });
+}
 
 // ---------------------------------------------------------------------------
 // Windows PATH refresh
@@ -632,6 +648,7 @@ module.exports = {
   info,
   run,
   runDirect,
+  openUrl,
   capture,
   commandExists,
   refreshWindowsPath,

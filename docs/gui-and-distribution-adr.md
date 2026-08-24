@@ -1,7 +1,7 @@
 # ADR-001: Adding an In-Terminal UI and One-Command Distribution to dev-env-setup
 
-**Status:** Accepted (terminal-UI architecture) — implemented; distribution questions below still open
-**Date:** 2026-08-24 (revised same day — see "Revision note")
+**Status:** Accepted — both the terminal-UI architecture and the distribution model are implemented
+**Date:** 2026-08-24 (revised twice same day — see "Revision note" and "Resolved: the private-repo chicken-and-egg problem")
 **Deciders:** Mujtaba (EcomExperts) + whoever owns the GitHub org/repo policy for EcomExperts-io
 
 ## Revision note
@@ -176,16 +176,17 @@ Windows vs. Unix and still market themselves as "one command to install."
 
 - **macOS / Linux:**
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/main/bootstrap.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh | bash
   ```
 - **Windows (PowerShell):**
   ```powershell
-  irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/main/bootstrap.ps1 | iex
+  irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.ps1 | iex
   ```
 
-Both scripts already do the "make sure Node exists, then install the UI
-dependency" work end to end — nothing further needs to change in them for
-this to work, once the hosting question below is resolved.
+Both scripts do the "make sure Node exists, self-download the repo if
+there isn't a local copy already, then install the UI dependency" work end
+to end — this is now fully implemented and working, not just proposed
+(see "Resolved" section below for what that took).
 
 *A genuinely OS-agnostic single line* is possible via a polyglot script
 (a file that's simultaneously valid `sh` and valid PowerShell). It's a neat
@@ -194,55 +195,68 @@ next engineer to read and maintain. Recommendation: don't do this unless
 there's a strong reason to — two clearly-documented one-liners is the
 better trade.
 
-## Open Question: the private-repo chicken-and-egg problem
+## Resolved: the private-repo chicken-and-egg problem
 
-Still the most important thing to decide before this can actually be used
-by a brand-new hire, and still a decision for EcomExperts, not a technical
-one to make unilaterally.
+**Final decision:** `dev-env-setup` is now **public**. Two intermediate
+designs were built and then set aside before landing here — worth
+recording why, since both are reasonable approaches under different
+constraints:
 
-`curl`/`irm`-ing a raw file from a **private** GitHub repo requires
-authentication — plain `curl -fsSL https://raw.githubusercontent.com/...`
-on a private repo returns a 404. That's a real problem here specifically,
-because:
+1. **First pass:** keep the repo private, gate access with a GitHub
+   Device Flow login + org-membership check (`installer/install.sh`/
+   `installer/install.ps1`). This worked (it was built and tested against
+   a mocked GitHub API — success, org-rejection, and cancellation paths
+   all verified) and had a real advantage: it would have doubled as an
+   identity check, not just a download mechanism.
+2. **Revised:** once the repo was actually made public, that whole
+   mechanism became unnecessary — a public repo has no download-auth
+   problem to solve, and no verification gate was wanted in front of the
+   installer after all. The `installer/` folder (OAuth app, device flow,
+   org check) was removed entirely.
 
-- The people most likely to run this one-liner are **brand-new hires on a
-  brand-new machine** who don't have GitHub access configured yet.
-- Part of what this tool *does* is set up their GitHub SSH access in the
-  first place.
-- If the repo hosting the installer itself requires GitHub auth to fetch,
-  that's a circular dependency: you need GitHub access to get the tool
-  that sets up your GitHub access.
+What's actually implemented now: `bootstrap.sh` and `bootstrap.ps1`
+**self-download the repo when they don't find a local copy next to
+themselves.** Concretely:
 
-Options to resolve this:
+- Bash checks whether `bin/setup.js` exists next to the running script.
+  When the script is piped straight into `bash` (`curl ... | bash`),
+  there's no real file on disk to check next to — `${BASH_SOURCE[0]}` is
+  unset in that mode, which the script defaults safely instead of
+  crashing on it (a real bug caught while testing this: under `set -u`,
+  a bare `${BASH_SOURCE[0]}` reference blows up the instant this is piped
+  rather than run from a saved file).
+- PowerShell does the equivalent check via `$MyInvocation.MyCommand.Path`,
+  which is `$null` when the script reached this process via `irm | iex`
+  instead of being run as a real `.ps1` file (also a real bug caught in
+  testing: `Split-Path -Parent $null` throws under
+  `$ErrorActionPreference = "Stop"`, which would have crashed the script
+  on line one of every single piped run).
+- In either case, when no local copy is found, the script downloads the
+  public repo directly from GitHub (a plain `.tar.gz`/`.zip` archive
+  download — no auth, no token, no API calls needed since the repo is
+  public), extracts it to `Documents/EcomExperts/Clients/dev-env-setup`,
+  and continues exactly as it would have from a real local checkout.
+- Running it from an actual local clone (the traditional way) still works
+  identically — the self-download only ever triggers when there's nothing
+  to find.
 
-1. **Make the `dev-env-setup` repo itself public.** It contains no secrets
-   or client data — it's setup automation (install Git, generate an SSH
-   key locally, print instructions). The private `pipeline-rules` repo
-   (linting rules, `CloneSetUp.sh`) stays private and is only cloned
-   *after* this tool has helped the user get their own SSH key added to
-   GitHub — already how the flow works today. Simplest fix, costs nothing
-   sensitive.
-2. **Keep everything private**, and distribute a short-lived read-only
-   token via an internal wiki/Slack pinned message instead of a public URL.
-   Works, but "anyone can run" isn't quite true anymore (needs an internal
-   doc lookup first), and tokens expire/rotate, so pinned instructions go
-   stale.
-3. **Host just the bootstrap entry point publicly** (a public gist,
-   GitHub Pages, or a tiny public "installer" repo) while the rest stays
-   private, with the public bootstrap script carrying/prompting for a
-   token to pull the private rest. More moving parts than #1 for no clear
-   benefit.
+This means the two one-liners from the very first version of this
+document work exactly as originally proposed, with no separate
+"installer" repo, no OAuth app, and nothing else to stand up:
 
-**Recommendation: Option 1** — make `dev-env-setup` public. It's internal
-tooling, not IP, and it removes the chicken-and-egg problem entirely. This
-still needs a real decision from whoever owns EcomExperts-io's GitHub org
-policy.
+- **macOS / Linux:** `curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh | bash`
+- **Windows (PowerShell):** `irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.ps1 | iex`
+
+(Branch is `Main`, capital M — confirmed by checking the actual public repo, not assumed.)
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A["Person runs one line\n(bootstrap.sh or bootstrap.ps1)\nfrom curl/irm"] --> B["Bootstrap script:\nensures Node.js exists,\nnpm-installs the UI dependency (blessed)"]
+    A["Person runs one line\n(bootstrap.sh or bootstrap.ps1)\nfrom curl/irm"] --> A2{"Local copy of the repo\nfound next to the script?"}
+    A2 -- no, this is a fresh piped run --> A3["Self-download: fetch the public repo's\narchive from GitHub, extract to\nDocuments/EcomExperts/Clients/dev-env-setup"]
+    A2 -- yes, already cloned locally --> B
+    A3 --> B["Bootstrap script:\nensures Node.js exists,\nnpm-installs the UI dependency (blessed)"]
     B --> C["node bin/setup.js"]
     C --> D{"stdin & stdout\nboth a real terminal?"}
     D -- yes --> E["Terminal UI (src/tui/app.js)\nfull-screen checklist, then live sidebar + log"]
@@ -311,11 +325,12 @@ has gone through, especially:
 
 ## Open Questions (need a decision, not assumptions)
 
-1. **Public vs. private repo** (see dedicated section above) — recommend public, needs sign-off. Unaffected by the terminal-UI pivot.
-2. **Always-latest `main` vs. tagged releases** for the one-liner. Worth pinning to a tag once this is actually distributed this way, the way rustup/nvm do.
+1. ~~Public vs. private repo~~ **Resolved:** the repo is now public, with self-downloading bootstrap scripts instead of an access gate (see dedicated section above).
+2. **Always-latest `Main` vs. tagged releases** for the one-liner. Worth pinning to a tag once this sees real usage, the way rustup/nvm do.
 3. **Keep the `--cli` fallback long-term, not just as an error fallback?** Recommend yes — it's free (it's the pre-existing behavior, untouched) and covers CI, accessibility, and personal preference.
 4. **Any telemetry/error reporting?** Same open question as before — right now, a failure is only visible to the person hitting it.
 5. ~~Zero-dependency GUI server, or one small dependency?~~ Resolved by this revision: one small dependency (`blessed`), auto-installed, with automatic fallback if that install fails.
+6. ~~Should losing GitHub org access immediately break an already-downloaded local copy?~~ Moot now that the repo is public — there's no access control left to revoke in the first place.
 
 ## Consequences
 
@@ -323,15 +338,16 @@ has gone through, especially:
 - New hires get a guided, checklist-driven experience instead of a wall of scrolling text, without losing anything — everything the CLI already did (verification loops, retries, multi-select) works identically underneath.
 - The classic CLI keeps working unchanged for anyone who needs it.
 - Future install-logic bug fixes apply to both modes automatically, since they share the same step files.
+- The final distribution model ended up simpler than either GUI-era draft of this document proposed: one file each for Mac/Linux and Windows, no server, no OAuth app, no separate repo — just two scripts that can find and download the rest of themselves.
 
 **Gets harder:**
 - One more thing to sanity-check per change to a step file's prompts: does a new `ask()`/`confirm()` call still read sensibly in a small modal box, not just as a terminal line.
-- The public-repo decision still has to actually get made and owned by someone — the distribution half of this plan can't finish without it.
 - Real-terminal testing (Windows Terminal, iTerm, GNOME Terminal, tmux/screen sessions) is a new category of "did this actually render right" that the plain CLI never needed.
+- Anyone, not just EcomExperts staff, can now run the installer end to end (the trade-off of making the repo public) — acceptable since it contains no secrets or client data, same reasoning as the original Option 1 recommendation in the first version of this document.
 
 **Will need to revisit:**
 - Whether the coding-tools multi-select (`09-editor.js`) should eventually become native checkboxes in the checklist screen itself, rather than a modal text-input ("enter numbers separated by commas") — works fine as-is today, but a natural follow-up polish item.
-- Distribution/versioning strategy (Open Question 2) once real usage shows how often `main` actually changing mid-flight matters in practice.
+- Distribution/versioning strategy (Open Question 2) once real usage shows how often `Main` actually changing mid-flight matters in practice.
 
 ## Action Items
 
@@ -340,7 +356,10 @@ has gone through, especially:
 3. [x] Build the terminal UI: checklist screen, live run screen, modal ask/confirm.
 4. [x] Auto-detect terminal UI vs. classic CLI in `src/index.js`, with automatic fallback.
 5. [x] Smoke-test the full flow (navigation, toggling, prompts, pass/fail) in a real pseudo-terminal.
-6. [ ] Real-machine pass on Windows Terminal, macOS Terminal/iTerm, and a Linux terminal — the same kind of hands-on testing every other step in this project has already gone through.
-7. [ ] Get a decision on public vs. private repo hosting (blocks a brand-new hire from being able to use the one-liner at all).
-8. [ ] Decide on tagged-release vs. always-`main` distribution.
-9. [ ] Publish the two one-liners once 7–8 are resolved.
+6. [x] ~~Build the GitHub Device Flow + org-check access gate~~ Built, tested, then removed once the repo went public — see "Resolved" section above.
+7. [x] Make the repo public (done by EcomExperts).
+8. [x] Add self-download logic to `bootstrap.sh`/`bootstrap.ps1` so the one-liners work with nothing pre-downloaded.
+9. [x] Fix two real bugs this surfaced: an unbound-variable crash in bash under a piped run, and a `Split-Path -Parent $null` crash in PowerShell under the same condition.
+10. [x] Smoke-test the self-download path end to end (simulated piped `curl | bash`, mocked GitHub archive) — confirmed it downloads, extracts, and hands off correctly.
+11. [ ] Real-machine pass of the actual one-liners on Windows, macOS, and Linux, from a machine with nothing pre-downloaded — the same kind of hands-on testing every other step in this project has already gone through, and the one thing that couldn't be verified from here.
+12. [ ] Decide on tagged-release vs. always-`Main` distribution (Open Question 2).

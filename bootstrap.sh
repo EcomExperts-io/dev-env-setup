@@ -3,15 +3,45 @@
 #
 # This script's only job is to make sure Node.js exists, then it hands off
 # to the real setup tool (a Node CLI) for everything else. Safe to re-run.
+#
+# Works two ways:
+#   - From inside an already-downloaded copy of this repo (the traditional
+#     way): just run ./bootstrap.sh
+#   - As a single command, with nothing downloaded yet:
+#       curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh | bash
+#     There's no local checkout to find next to the script in that case
+#     (it's being read straight off stdin) — this script notices that and
+#     downloads one itself first (the repo is public, so no login/token is
+#     needed), then carries on exactly as it would from a real checkout.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_OWNER="EcomExperts-io"
+REPO_NAME="dev-env-setup"
+REPO_REF="Main"
 
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
 info() { printf "  %s\n" "$1"; }
 
 bold "EcomExperts dev-setup — bootstrap"
+
+# ${BASH_SOURCE[0]:-.} (rather than a bare ${BASH_SOURCE[0]}) matters here:
+# under `set -u`, a piped `curl ... | bash` run has no real BASH_SOURCE to
+# read, and this is exactly the case that needs a default instead of
+# crashing on an unbound variable.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
+
+if [ ! -f "$SCRIPT_DIR/bin/setup.js" ]; then
+  info "No local copy of the setup tool found next to this script — downloading one..."
+  INSTALL_DIR="$HOME/Documents/EcomExperts/Clients/$REPO_NAME"
+  mkdir -p "$INSTALL_DIR"
+  tmp_tarball="$(mktemp)"
+  curl -fsSL "https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_REF}.tar.gz" -o "$tmp_tarball"
+  tar -xzf "$tmp_tarball" -C "$INSTALL_DIR" --strip-components=1
+  rm -f "$tmp_tarball"
+  SCRIPT_DIR="$INSTALL_DIR"
+  info "Downloaded to $INSTALL_DIR"
+fi
 
 OS="$(uname -s)"
 

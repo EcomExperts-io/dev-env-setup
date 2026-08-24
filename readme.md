@@ -42,7 +42,11 @@ already have:
     execute a `.sh` file directly; without that shortcut, PowerShell would
     just try to *open* the file instead of running it)
 11. The shared ESLint / theme-check linting rules
-12. Oh My Zsh (optional, macOS/Linux only)
+12. Slack desktop app
+13. Time Doctor desktop app — the one exception to full automation (see
+    below); it just checks whether it's already installed and, if not,
+    opens the download page for you
+14. Oh My Zsh (optional, macOS/Linux only)
 
 It's safe to run more than once — completed steps are detected and skipped,
 so if something fails partway through (no internet, a permission prompt you
@@ -57,6 +61,33 @@ guidance if it didn't work — rather than silently continuing and letting
 the failure surface confusingly several steps later.
 
 ## Quickstart
+
+### One-line install (recommended — nothing to download first)
+
+This repo is public, so `bootstrap.sh`/`bootstrap.ps1` can be fetched and
+run directly. If there's no local copy of the tool next to the script yet
+(which is always true the first time, since nothing's downloaded), it
+downloads one itself (to `Documents/EcomExperts/Clients/dev-env-setup`)
+before continuing — so this really is the whole thing, start to finish, in
+one line:
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.ps1 | iex
+```
+
+(Branch name is `Main`, capital M — check that's still accurate if this repo's default branch ever changes.)
+
+### Running it from a local copy
+
+If you already have this repo downloaded/cloned, you don't need the
+one-liner at all — just run the script directly and it'll skip the
+download step since it finds itself already there:
 
 **macOS / Linux** — open Terminal, `cd` into this folder, then:
 
@@ -125,6 +156,13 @@ what to do, and wait for you:
   fallback — this shouldn't normally happen)
 - Windows Ruby installs when `winget` isn't available (RubyInstaller needs
   a manual download + wizard)
+- Time Doctor, on every machine: unlike everything else in this list, there's
+  no winget package, Homebrew cask, or snap for it, and its downloads are
+  gated behind signing into your company Time Doctor account first — there's
+  no plain installer link a script can fetch, and the vendor documents no
+  silent-install flag. The tool checks whether it's already installed and,
+  if not, opens the download page for you to sign in and install by hand;
+  re-run the tool afterwards and it'll detect it and skip
 
 If any step fails, it prints the manual fallback command/link — copy the
 error into ChatGPT first if you're not sure what went wrong, that's usually
@@ -140,8 +178,8 @@ tool is the normal way to retry a step that failed or was skipped.
 
 ```
 dev-env-setup/
-├── bootstrap.sh        # macOS/Linux entry point
-├── bootstrap.ps1        # Windows entry point
+├── bootstrap.sh        # macOS/Linux entry point — also self-downloads the repo when run via the one-liner
+├── bootstrap.ps1        # Windows entry point — same self-download behavior
 ├── bin/setup.js          # Node CLI entry point (called by both bootstraps)
 └── src/
     ├── index.js          # picks terminal-UI or classic mode, orchestrates the steps below
