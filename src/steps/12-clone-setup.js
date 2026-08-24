@@ -91,12 +91,21 @@ function windowsPowerShellProfilePaths() {
 
 function ensureWindowsPowerShellShortcuts(wrapperCmdPath) {
   const marker = '# Added by EcomExperts dev-setup — CloneSetUp forwarding';
+  // No quotes around the function names below — PowerShell's `function`
+  // keyword needs a bare name token right after it ("function Foo { }");
+  // a quoted string there ("function \"Foo\" { }") is a parse error, not
+  // just a style choice. (A dot in an unquoted name like CloneSetUp.sh is
+  // fine — PowerShell command/function names allow it unquoted.) This
+  // used to ship with quotes, which broke every PowerShell window on a
+  // machine that had already run this step — see the marker-scan repair
+  // below for how an already-broken profile gets fixed on a re-run instead
+  // of being permanently stuck once the marker makes it look "done".
   const block = [
     marker,
-    'function "CloneSetUp.sh" {',
+    'function CloneSetUp.sh {',
     `    & "${wrapperCmdPath}" @args`,
     '}',
-    'function "CloneSetUp" {',
+    'function CloneSetUp {',
     `    & "${wrapperCmdPath}" @args`,
     '}',
     '',
@@ -112,7 +121,23 @@ function ensureWindowsPowerShellShortcuts(wrapperCmdPath) {
       } catch {
         // profile doesn't exist yet — fine, it'll be created
       }
-      if (content.includes(marker)) continue; // already added
+      if (content.includes(marker)) {
+        // Already added — but if it's the old broken (quoted-name) version
+        // from before this fix, replace just that block rather than
+        // leaving a permanently-parse-broken profile in place forever.
+        if (/function\s+"CloneSetUp/.test(content)) {
+          const startIdx = content.indexOf(marker);
+          const afterMarker = content.slice(startIdx + marker.length);
+          const closeIdx = afterMarker.lastIndexOf('}');
+          if (closeIdx !== -1) {
+            const before = content.slice(0, startIdx);
+            const after = afterMarker.slice(closeIdx + 1);
+            fs.writeFileSync(profilePath, before + block + after);
+            updated.push(profilePath);
+          }
+        }
+        continue;
+      }
       const separator = content && !content.endsWith('\n') ? '\r\n' : '';
       fs.appendFileSync(profilePath, separator + block);
       updated.push(profilePath);
