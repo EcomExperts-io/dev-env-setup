@@ -1,4 +1,4 @@
-﻿# EcomExperts dev environment bootstrap - Windows
+# EcomExperts dev environment bootstrap - Windows
 #
 # This script's only job is to make sure Node.js exists, then it hands off
 # to the real setup tool (a Node CLI) for everything else. Safe to re-run.
