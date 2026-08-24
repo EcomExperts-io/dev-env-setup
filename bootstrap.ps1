@@ -204,7 +204,18 @@ if ((Test-Path $packageJson) -and (-not (Test-Path $blessedDir))) {
     } else {
         Push-Location $scriptDir
         try {
-            npm install --omit=dev --no-audit --no-fund
+            # Not calling `npm` directly here on purpose: npm ships an
+            # npm.ps1 alongside npm.cmd on Windows, and PowerShell prefers
+            # the .ps1 when resolving a bare command name - which means
+            # THIS session's execution policy applies, no matter how this
+            # script itself was launched (this exact case showed up when
+            # bootstrap.ps1 was run via `irm | iex`, which never touches
+            # the session's policy - only bypasses the check for loading
+            # bootstrap.ps1 itself, not for anything it calls afterward).
+            # Routing through a nested PowerShell process with an explicit
+            # -ExecutionPolicy Bypass sidesteps that regardless of how this
+            # script was invoked or what the ambient policy is.
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "npm install --omit=dev --no-audit --no-fund"
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "  Note: npm install didn't succeed (exit code $LASTEXITCODE) - see any output above for why." -ForegroundColor Yellow
                 Write-Host "  The setup tool still works fine - it'll use its plain text mode instead." -ForegroundColor Yellow
