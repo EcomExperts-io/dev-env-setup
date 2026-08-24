@@ -85,6 +85,14 @@ curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/b
 irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.ps1 | iex
 ```
 
+**Use this Powershell for Beta -version of the tool may have some inconsistencies
+
+```powershell
+$env:EE_SETUP_REF = "Develop"
+irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.ps1 | iex
+```
+
+
 (Branch name is `Main`, capital M — check that's still accurate if this repo's default branch ever changes.)
 
 On Windows, if Node.js had to be installed fresh, don't be surprised if a
