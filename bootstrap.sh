@@ -103,21 +103,6 @@ fi
 
 info "Node $(node -v) ready."
 
-# The setup tool's terminal UI (the full-screen, arrow-key checklist) needs
-# one small dependency (blessed). Install it automatically here so nobody
-# ever has to run `npm install` by hand — same "fully automatic" principle
-# as everything else in this script. If it fails for any reason (offline,
-# locked-down machine, npm registry unreachable), don't abort the whole
-# setup over it: the tool detects a missing dependency itself and falls
-# back to its plain text mode automatically.
-if [ -f "$SCRIPT_DIR/package.json" ] && [ ! -d "$SCRIPT_DIR/node_modules/blessed" ]; then
-  info "Installing the terminal UI dependency (one-time)..."
-  ( cd "$SCRIPT_DIR" && npm install --omit=dev --no-audit --no-fund ) || {
-    echo "  Note: couldn't install the terminal UI dependency automatically."
-    echo "  The setup tool still works fine — it'll use its plain text mode instead."
-  }
-fi
-
 info "Handing off to the setup tool..."
 echo ""
 

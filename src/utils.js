@@ -127,26 +127,14 @@ function addDirToUnixPath(dir) {
 }
 
 // ---------------------------------------------------------------------------
-// Logging & prompts — pluggable "IO driver"
+// Logging & prompts
 // ---------------------------------------------------------------------------
-//
-// Every step file calls the free functions below (log/heading/ok/.../ask/
-// confirm) directly — none of them talk to console.log or readline
-// themselves. That's deliberate: it means the *entire* presentation layer
-// can be swapped out in one place (here) without touching any of the 15
-// step files. The terminal-UI mode (src/tui/app.js) does exactly that —
-// it installs a driver that renders into a blessed log widget and pops
-// modal boxes for prompts instead of printing to stdout — and every
-// existing step file works with it completely unmodified.
-//
-// consoleDriver is today's exact original behavior, preserved byte-for-byte
-// as the default so plain `node bin/setup.js` (or `--cli`) never changes.
 
 function makeRl() {
   return readline.createInterface({ input: process.stdin, output: process.stdout });
 }
 
-function consoleAsk(question, { defaultValue, validate } = {}) {
+function ask(question, { defaultValue, validate } = {}) {
   return new Promise((resolve) => {
     const rl = makeRl();
     const suffix = defaultValue ? c.dim(` (${defaultValue})`) : '';
@@ -168,101 +156,44 @@ function consoleAsk(question, { defaultValue, validate } = {}) {
   });
 }
 
-async function consoleConfirm(question, defaultYes = true) {
+async function confirm(question, defaultYes = true) {
   const hint = defaultYes ? 'Y/n' : 'y/N';
-  const answer = await consoleAsk(`${question} (${hint})`, {});
+  const answer = await ask(`${question} (${hint})`, {});
   if (!answer) return defaultYes;
   return /^y(es)?$/i.test(answer.trim());
 }
 
-const consoleDriver = {
-  log(msg = '') {
-    console.log(msg);
-  },
-  heading(msg) {
-    console.log('\n' + c.bold(c.cyan(`▸ ${msg}`)));
-  },
-  ok(msg) {
-    console.log(c.green('  ✔ ') + msg);
-  },
-  skip(msg) {
-    console.log(c.gray('  – ') + c.gray(msg));
-  },
-  warn(msg) {
-    console.log(c.yellow('  ! ') + msg);
-  },
-  fail(msg) {
-    console.log(c.red('  ✘ ') + msg);
-  },
-  info(msg) {
-    console.log(c.dim('  ' + msg));
-  },
-  ask: consoleAsk,
-  confirm: consoleConfirm,
-};
-
-let currentDriver = consoleDriver;
-
-/** Swap the active IO driver (used by the TUI). Returns the previous one. */
-function setIoDriver(driver) {
-  const previous = currentDriver;
-  currentDriver = driver;
-  return previous;
-}
-
-function getIoDriver() {
-  return currentDriver;
-}
-
 function log(msg = '') {
-  currentDriver.log(msg);
+  console.log(msg);
 }
 
 function heading(msg) {
-  currentDriver.heading(msg);
+  console.log('\n' + c.bold(c.cyan(`▸ ${msg}`)));
 }
 
 function ok(msg) {
-  currentDriver.ok(msg);
+  console.log(c.green('  ✔ ') + msg);
 }
 
 function skip(msg) {
-  currentDriver.skip(msg);
+  console.log(c.gray('  – ') + c.gray(msg));
 }
 
 function warn(msg) {
-  currentDriver.warn(msg);
+  console.log(c.yellow('  ! ') + msg);
 }
 
 function fail(msg) {
-  currentDriver.fail(msg);
+  console.log(c.red('  ✘ ') + msg);
 }
 
 function info(msg) {
-  currentDriver.info(msg);
+  console.log(c.dim('  ' + msg));
 }
 
 // ---------------------------------------------------------------------------
 // Shell execution
 // ---------------------------------------------------------------------------
-//
-// run()/runDirect()/runInstaller() all use inherited stdio, so a child
-// process's own output goes straight to the real terminal. That's invisible
-// in plain CLI mode, but the terminal UI takes over the whole screen with
-// its own alternate-buffer rendering — if a child process wrote to the
-// terminal while that was active, its output would corrupt the TUI's
-// screen instead of showing up cleanly. shellOutHook lets the active
-// presentation layer step out of the way for the duration of one command
-// (and back in afterwards); the console driver leaves it as a no-op since
-// there's nothing to step out of.
-let shellOutHook = { before() {}, after() {} };
-
-/** Swap the active shell-out hook (used by the TUI). Returns the previous one. */
-function setShellOutHook(hook) {
-  const previous = shellOutHook;
-  shellOutHook = hook;
-  return previous;
-}
 
 /**
  * Run a command, streaming stdio to the terminal. Returns true on success,
@@ -270,9 +201,19 @@ function setShellOutHook(hook) {
  */
 function run(cmd, opts = {}) {
   const shell = isWindows ? 'powershell.exe' : '/bin/bash';
-  const shellFlag = isWindows ? '-Command' : '-c';
-  const usesInheritedStdio = !opts.silent;
-  if (usesInheritedStdio) shellOutHook.before();
+  // On Windows, several real commands this tool runs (npm, RubyInstaller's
+  // ridk, and others) ship as a .ps1 script alongside their .exe/.cmd
+  // counterpart — and PowerShell's own command resolution prefers that .ps1
+  // over the .cmd when you invoke the bare name, which means execution
+  // policy applies even though nothing here is "our" script. Without
+  // -ExecutionPolicy Bypass here, any machine with a stricter-than-default
+  // policy (common on managed/company machines) fails with "cannot be
+  // loaded because running scripts is disabled on this system" on totally
+  // ordinary commands like `npm install`. -NoProfile avoids a slower start
+  // and any interference from a user's PowerShell profile script.
+  const shellArgs = isWindows
+    ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd]
+    : ['-c', cmd];
   try {
     // Two independent knobs, since a command can need either or both:
     //   - opts.timeoutMs: never let a command hang the whole tool forever —
@@ -284,7 +225,7 @@ function run(cmd, opts = {}) {
     const usingAutoConfirm = typeof opts.autoConfirmInput === 'string';
     const stdio = usingAutoConfirm ? ['pipe', 'inherit', 'inherit'] : opts.silent ? 'pipe' : 'inherit';
 
-    const result = spawnSync(shell, [shellFlag, cmd], {
+    const result = spawnSync(shell, shellArgs, {
       stdio,
       input: usingAutoConfirm ? opts.autoConfirmInput : undefined,
       cwd: opts.cwd,
@@ -312,8 +253,6 @@ function run(cmd, opts = {}) {
   } catch (err) {
     if (opts.throwOnError) throw err;
     return { success: false, status: -1, error: err };
-  } finally {
-    if (usesInheritedStdio) shellOutHook.after();
   }
 }
 
@@ -326,8 +265,6 @@ function run(cmd, opts = {}) {
  * actually receives. Passing args as a real array sidesteps that entirely.
  */
 function runDirect(command, args = [], opts = {}) {
-  const usesInheritedStdio = !opts.silent;
-  if (usesInheritedStdio) shellOutHook.before();
   try {
     const result = spawnSync(command, args, {
       stdio: opts.silent ? 'pipe' : 'inherit',
@@ -341,8 +278,6 @@ function runDirect(command, args = [], opts = {}) {
     return { success: result.status === 0, status: result.status, stdout: result.stdout, stderr: result.stderr };
   } catch (err) {
     return { success: false, error: err };
-  } finally {
-    if (usesInheritedStdio) shellOutHook.after();
   }
 }
 
@@ -365,11 +300,15 @@ function capture(cmd, opts = {}) {
 function commandExists(cmd) {
   if (isWindows) {
     refreshWindowsPath();
-    const result = spawnSync('powershell.exe', ['-Command', `Get-Command ${cmd} -ErrorAction SilentlyContinue`], {
-      stdio: 'pipe',
-      encoding: 'utf8',
-      env: process.env,
-    });
+    const result = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Get-Command ${cmd} -ErrorAction SilentlyContinue`],
+      {
+        stdio: 'pipe',
+        encoding: 'utf8',
+        env: process.env,
+      }
+    );
     return result.status === 0 && result.stdout.trim().length > 0;
   }
   const result = spawnSync('/bin/bash', ['-c', `command -v ${cmd}`], {
@@ -537,7 +476,6 @@ function fetchJson(url, redirectsLeft = 5) {
 
 /** Run a downloaded installer directly (no shell layer in between) and refresh PATH after. */
 function runInstaller(exePath, args = []) {
-  shellOutHook.before();
   try {
     const result = spawnSync(exePath, args, { stdio: 'inherit' });
     refreshWindowsPath();
@@ -545,8 +483,6 @@ function runInstaller(exePath, args = []) {
     return { success: result.status === 0, status: result.status };
   } catch (err) {
     return { success: false, error: err };
-  } finally {
-    shellOutHook.after();
   }
 }
 
@@ -567,20 +503,6 @@ function gitCloneSsh(repoUrl, destDir, opts = {}) {
     ...opts,
     env: { ...(opts.env || {}), GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=accept-new' },
   });
-}
-
-// ---------------------------------------------------------------------------
-// Prompts — thin wrappers over the active IO driver (see above). Behaves
-// exactly as before when the console driver is active; routes to a modal
-// box in the terminal UI when that driver is active instead.
-// ---------------------------------------------------------------------------
-
-function ask(question, opts = {}) {
-  return currentDriver.ask(question, opts);
-}
-
-function confirm(question, defaultYes = true) {
-  return currentDriver.confirm(question, defaultYes);
 }
 
 // ---------------------------------------------------------------------------
@@ -665,8 +587,5 @@ module.exports = {
   confirm,
   verifyWithRetry,
   runStep,
-  setIoDriver,
-  getIoDriver,
-  setShellOutHook,
   colors: c,
 };

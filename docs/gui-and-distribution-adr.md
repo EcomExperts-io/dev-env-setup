@@ -1,7 +1,7 @@
 # ADR-001: Adding an In-Terminal UI and One-Command Distribution to dev-env-setup
 
-**Status:** Accepted — both the terminal-UI architecture and the distribution model are implemented
-**Date:** 2026-08-24 (revised twice same day — see "Revision note" and "Resolved: the private-repo chicken-and-egg problem")
+**Status:** Distribution model accepted and implemented. The terminal-UI effort was **removed entirely** after real-machine testing — see "Revision note 3". This document now mainly records why, for anyone tempted to try it again.
+**Date:** 2026-08-24 (revised multiple times same day — see "Revision note", "Resolved: the private-repo chicken-and-egg problem", "Revision note 2", "Revision note 3")
 **Deciders:** Mujtaba (EcomExperts) + whoever owns the GitHub org/repo policy for EcomExperts-io
 
 ## Revision note
@@ -15,6 +15,54 @@ meaningfully different (and simpler) architecture, so this document has
 been rewritten around it rather than patched. The distribution section
 (single command, public-vs-private repo) is unaffected by the pivot and is
 carried over as-is.
+
+## Revision note 2 — TUI pulled from the default path
+
+Real-machine testing (Windows) turned up genuinely corrupted, overlapping
+on-screen rendering — not a cosmetic nit, text actively unreadable/mixed
+together. The first hypothesis was a Windows-console-host limitation (the
+legacy "Windows PowerShell"/conhost.exe host has known gaps in full-screen
+VT rendering that Windows Terminal doesn't share), and a fix shipped to
+auto-detect and fall back in that case. The same corruption then reproduced
+in Windows Terminal itself — a terminal with excellent VT/ANSI support and
+no trouble running other full-screen tools — which rules that hypothesis
+out. That points to a real bug in this project's own handling of shelling
+out to a real command (winget/npm/the Shopify CLI/...) while the TUI's
+alternate screen buffer is active — most likely in the pause/resume
+handling in `src/tui/app.js`'s `shellOutHook`, though it wasn't practically
+debuggable further without a live terminal session to reproduce and
+iterate against (this sandbox has no real TTY).
+
+Given a broken-looking screen is worse than no screen, the decision at the
+time was to make the classic plain-text wizard the default in every
+environment — not just non-terminal/CI cases — while leaving the TUI in
+place behind an explicit `--tui`/`--gui` flag.
+
+## Revision note 3 — TUI removed entirely
+
+More real-machine testing kept surfacing the same class of problem —
+corrupted rendering, and separately, one of the `--tui` code path's own
+supporting changes (bundling `blessed`, an `npm install` inside
+`bootstrap.ps1`/`bootstrap.sh` to fetch it) turned into its own source of
+execution-policy failures on managed Windows machines, on top of the
+rendering bug itself. At that point the TUI had cost more real debugging
+time than it was worth for a feature nobody could reliably use, so rather
+than keep it around as a half-working opt-in with its own failure modes,
+the decision changed to **removing it completely**:
+
+- `src/tui/` deleted, `src/index.js` back to a single, unconditional
+  classic-wizard loop — no `--tui`/`--gui`/`--cli` flags, no mode
+  detection, no IO-driver abstraction in `utils.js`.
+- The `blessed` dependency dropped from `package.json`; `bootstrap.sh` and
+  `bootstrap.ps1` no longer run `npm install` for anything, since nothing
+  in this tool has an npm dependency anymore.
+- The `Restart-Setup` (elevate + fresh window) mechanism in `bootstrap.ps1`
+  stays — that one's earning its keep independent of the TUI, fixing a
+  real Node-not-visible-on-PATH problem after a fresh install.
+
+If an in-terminal UI is worth revisiting later, it should be a fresh
+attempt with access to a real Windows terminal to iterate against from the
+start, not a continuation of this implementation.
 
 ## Context
 
@@ -84,11 +132,12 @@ Concretely, this is already implemented:
    handing off, so the terminal UI's one dependency is there automatically.
    If that install fails for any reason, the tool doesn't stop — it falls
    back to plain text mode on its own.
-2. `bin/setup.js` now auto-detects: if both stdin and stdout are a real
-   interactive terminal, it opens the full-screen checklist UI; otherwise
-   (CI, piped output, or if the UI dependency isn't available) it uses the
-   classic line-by-line wizard, unchanged from before. `--tui`/`--gui` and
-   `--cli` flags force either mode explicitly.
+2. `bin/setup.js` defaults to the classic line-by-line wizard, unchanged
+   from before, in every environment — see "Revision note 2": the
+   full-screen checklist UI is implemented but disabled by default pending
+   a real rendering bug, and only runs when explicitly requested via
+   `--tui`/`--gui`. `--cli` still forces classic mode explicitly (the
+   default anyway) and wins if both flags are passed.
 3. **None of the 15 step files were touched.** Every step already talked
    to a small set of shared functions in `utils.js`
    (`ok`/`warn`/`info`/`ask`/`confirm`/...) rather than to `console.log`
@@ -331,6 +380,7 @@ has gone through, especially:
 4. **Any telemetry/error reporting?** Same open question as before — right now, a failure is only visible to the person hitting it.
 5. ~~Zero-dependency GUI server, or one small dependency?~~ Resolved by this revision: one small dependency (`blessed`), auto-installed, with automatic fallback if that install fails.
 6. ~~Should losing GitHub org access immediately break an already-downloaded local copy?~~ Moot now that the repo is public — there's no access control left to revoke in the first place.
+7. **What does the TUI's rendering bug actually need to get fixed and re-enabled by default?** (see Revision note 2) At minimum: a real Windows Terminal session to reproduce against — this sandbox has no live TTY, so the pause/resume handling in `src/tui/app.js` has only ever been unit-tested against a fake terminal, never watched render for real. Worth specifically checking: whether `screen.alloc()`/a forced full redraw is needed right after `shellOutHook.after()` resumes (rather than relying on `screen.render()`'s incremental diff, which may be assuming stale state); and whether a command whose output is longer than one screen (e.g. `shopify theme list` against a store with many themes) scrolls the *normal* buffer in a way that desyncs blessed's cursor bookkeeping when it switches back to the *alternate* buffer. Until someone can watch it live and iterate, it stays opt-in only.
 
 ## Consequences
 

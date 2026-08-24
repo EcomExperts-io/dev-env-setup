@@ -7,13 +7,8 @@ const { runStep, refreshWindowsPath } = require('./utils');
 // anyone who runs `node bin/setup.js` directly.
 refreshWindowsPath();
 
-// 'Welcome' and 'Summary' are structural (an intro message, a final report)
-// rather than something to opt in/out of — { toggleable: false } tells the
-// terminal UI's checklist screen to always run them without listing them as
-// a choice. Every other step defaults to checked there, same as "yes to
-// everything" in the classic CLI.
 const steps = [
-  ['Welcome', require('./steps/01-welcome'), { toggleable: false }],
+  ['Welcome', require('./steps/01-welcome')],
   ['Folder structure', require('./steps/02-folder-structure')],
   ['Homebrew', require('./steps/03-homebrew')],
   ['Node & npm', require('./steps/04-node')],
@@ -29,10 +24,10 @@ const steps = [
   ['Slack', require('./steps/16-slack')],
   ['Time Doctor', require('./steps/17-timedoctor')],
   ['Oh My Zsh', require('./steps/14-oh-my-zsh')],
-  ['Summary', require('./steps/15-summary'), { toggleable: false }],
+  ['Summary', require('./steps/15-summary')],
 ];
 
-async function runClassic() {
+async function main() {
   const ctx = { results: [] };
   for (const [name, fn] of steps) {
     const result = await runStep(name, fn, ctx);
@@ -40,36 +35,6 @@ async function runClassic() {
   }
   const anyFailed = ctx.results.some((r) => r.status === 'failed');
   process.exit(anyFailed ? 1 : 0);
-}
-
-const args = process.argv.slice(2);
-const forceCli = args.includes('--cli');
-const forceTui = args.includes('--tui') || args.includes('--gui');
-
-// Default to the terminal UI whenever we're actually attached to a real
-// interactive terminal (both stdin and stdout — a TUI needs to read
-// keystrokes AND draw a full screen). Falls back to the classic prompt-driven
-// CLI for CI, piped output, `--cli`, or if blessed can't start for any
-// reason at all — automatically, not as a manual step someone has to
-// remember to run.
-const canUseTui = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
-
-async function main() {
-  if (forceCli) {
-    return runClassic();
-  }
-  if (forceTui || canUseTui) {
-    try {
-      const { runTui } = require('./tui/app');
-      await runTui(steps);
-      return;
-    } catch (err) {
-      console.error('Could not start the terminal UI (' + (err.message || err) + ').');
-      console.error('Continuing in plain text mode instead...\n');
-      // fall through to the classic CLI below
-    }
-  }
-  return runClassic();
 }
 
 main().catch((err) => {

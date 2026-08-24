@@ -12,8 +12,5 @@
   "engines": {
     "node": ">=16"
   },
-  "license": "UNLICENSED",
-  "dependencies": {
-    "blessed": "^0.1.81"
-  }
+  "license": "UNLICENSED"
 }
