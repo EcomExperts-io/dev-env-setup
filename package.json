@@ -1,0 +1,19 @@
+{
+  "name": "ecomexperts-dev-setup",
+  "version": "1.0.0",
+  "description": "One-command development environment setup for EcomExperts developers (Windows, macOS, Linux).",
+  "private": true,
+  "bin": {
+    "ee-dev-setup": "bin/setup.js"
+  },
+  "scripts": {
+    "start": "node bin/setup.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "blessed": "^0.1.81"
+  }
+}
