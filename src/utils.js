@@ -270,19 +270,7 @@ function setShellOutHook(hook) {
  */
 function run(cmd, opts = {}) {
   const shell = isWindows ? 'powershell.exe' : '/bin/bash';
-  // On Windows, several real commands this tool runs (npm, RubyInstaller's
-  // ridk, and others) ship as a .ps1 script alongside their .exe/.cmd
-  // counterpart — and PowerShell's own command resolution prefers that .ps1
-  // over the .cmd when you invoke the bare name, which means execution
-  // policy applies even though nothing here is "our" script. Without
-  // -ExecutionPolicy Bypass here, any machine with a stricter-than-default
-  // policy (common on managed/company machines) fails with "cannot be
-  // loaded because running scripts is disabled on this system" on totally
-  // ordinary commands like `npm install`. -NoProfile avoids a slower start
-  // and any interference from a user's PowerShell profile script.
-  const shellArgs = isWindows
-    ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd]
-    : ['-c', cmd];
+  const shellFlag = isWindows ? '-Command' : '-c';
   const usesInheritedStdio = !opts.silent;
   if (usesInheritedStdio) shellOutHook.before();
   try {
@@ -296,7 +284,7 @@ function run(cmd, opts = {}) {
     const usingAutoConfirm = typeof opts.autoConfirmInput === 'string';
     const stdio = usingAutoConfirm ? ['pipe', 'inherit', 'inherit'] : opts.silent ? 'pipe' : 'inherit';
 
-    const result = spawnSync(shell, shellArgs, {
+    const result = spawnSync(shell, [shellFlag, cmd], {
       stdio,
       input: usingAutoConfirm ? opts.autoConfirmInput : undefined,
       cwd: opts.cwd,
@@ -377,15 +365,11 @@ function capture(cmd, opts = {}) {
 function commandExists(cmd) {
   if (isWindows) {
     refreshWindowsPath();
-    const result = spawnSync(
-      'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Get-Command ${cmd} -ErrorAction SilentlyContinue`],
-      {
-        stdio: 'pipe',
-        encoding: 'utf8',
-        env: process.env,
-      }
-    );
+    const result = spawnSync('powershell.exe', ['-Command', `Get-Command ${cmd} -ErrorAction SilentlyContinue`], {
+      stdio: 'pipe',
+      encoding: 'utf8',
+      env: process.env,
+    });
     return result.status === 0 && result.stdout.trim().length > 0;
   }
   const result = spawnSync('/bin/bash', ['-c', `command -v ${cmd}`], {

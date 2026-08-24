@@ -125,35 +125,30 @@ The bootstrap script's only job is making sure Node.js is installed — it
 then hands off to the real setup tool (`bin/setup.js`), which does
 everything else.
 
-### Terminal UI
+### Terminal UI (experimental, off by default)
 
-When you run it in a terminal that renders it well, it opens a full-screen,
-keyboard-driven UI right there in the terminal — a checklist of what to set
-up (↑/↓ to move, Space to toggle, Enter to start), then a live sidebar +
-scrolling log while it runs, same idea as tools like Chris Titus's WinUtil,
-just running inside your terminal instead of a separate window. Any
-question the setup needs to ask (your Git email, whether to install Oh My
-Zsh, ...) pops up as a small box right there rather than interrupting the
-log.
+There's an early full-screen, keyboard-driven UI in progress — a checklist
+of what to set up, then a live sidebar + scrolling log while it runs, same
+idea as tools like Chris Titus's WinUtil, just running inside your terminal
+instead of a separate window. It's **not enabled by default**: testing
+turned up real rendering corruption (overlapping/garbled text) that showed
+up even in Windows Terminal, a terminal with excellent support for this
+kind of full-screen rendering — pointing to a bug in this project's own
+handling of shelled-out commands (winget, npm, the Shopify CLI, ...) rather
+than a terminal limitation. Rather than risk showing a broken-looking
+screen, the reliable plain-text wizard is what actually runs, every time,
+until that's fixed and properly verified.
 
-On macOS/Linux, any normal terminal works. On Windows, this needs Windows
-Terminal or VS Code's integrated terminal — the classic "Windows
-PowerShell" console app (the blue window launched straight from the Start
-Menu, as opposed to Windows Terminal) doesn't render it cleanly, so the
-tool detects that and automatically uses the classic plain-text wizard
-there instead of showing a broken-looking screen. Windows Terminal comes
-pre-installed on Windows 11 and is a free Microsoft Store install on
-Windows 10, and is worth having anyway.
+The default plain-text wizard is what everyone gets when running this tool
+normally — no flags needed. It asks its questions and prints its progress
+line by line, plainly and reliably, everywhere.
 
-If your terminal can't support the full UI for any other reason either
-(piped output, some CI runners, or the one small UI dependency couldn't be
-installed automatically), it falls back on its own to the classic
-plain-text, line-by-line wizard — nothing to do on your end, it just works
-either way. You can also choose explicitly:
+If you want to try the in-progress terminal UI anyway (or help debug it),
+it's still there behind an explicit flag:
 
 ```bash
-node bin/setup.js --tui   # force the terminal UI
-node bin/setup.js --cli   # force the classic plain-text wizard
+node bin/setup.js --tui   # try the experimental terminal UI (may render incorrectly)
+node bin/setup.js --cli   # force the classic plain-text wizard (the default anyway)
 ```
 
 ## Naming convention

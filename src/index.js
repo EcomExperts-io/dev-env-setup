@@ -1,7 +1,6 @@
 'use strict';
 
 const { runStep, refreshWindowsPath } = require('./utils');
-const { isWindows } = require('./platform');
 
 // Make sure we start with the freshest possible view of PATH — the
 // bootstrap script already does this before handing off, but this covers
@@ -47,45 +46,31 @@ const args = process.argv.slice(2);
 const forceCli = args.includes('--cli');
 const forceTui = args.includes('--tui') || args.includes('--gui');
 
-// On Windows specifically, the legacy "Windows PowerShell" console host
-// (conhost.exe — the classic blue window launched from the Start Menu,
-// distinct from the separate Windows Terminal app) only partially supports
-// the full-screen VT/ANSI rendering blessed relies on. In testing it showed
-// up as genuinely corrupted, overlapping text — not a cosmetic quibble, an
-// actively broken-looking screen — while the identical UI renders cleanly
-// in Windows Terminal or VS Code's integrated terminal. A broken-looking
-// GUI is worse than no GUI, so only offer the TUI there when there's a
-// positive signal the terminal is one known to render it well.
-function isModernTerminal() {
-  if (!isWindows) return true; // macOS/Linux terminal emulators are reliably fine
-  if (process.env.WT_SESSION) return true; // Windows Terminal
-  if (process.env.TERM_PROGRAM === 'vscode') return true; // VS Code's integrated terminal
-  return false;
-}
-
-// Default to the terminal UI whenever we're actually attached to a real
-// interactive terminal (both stdin and stdout — a TUI needs to read
-// keystrokes AND draw a full screen) that's also known to render it well.
-// Falls back to the classic prompt-driven CLI for CI, piped output,
-// `--cli`, an unsupported Windows console, or if blessed can't start for
-// any reason at all — automatically, not as a manual step someone has to
-// remember to run.
-const canUseTui = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY) && isModernTerminal();
-
+// The terminal UI (blessed) is opt-in only via --tui/--gui, not the default.
+// It first looked like a Windows-console-host-support gap (garbled,
+// overlapping text) — but the same corruption showed up in testing on
+// Windows Terminal too, a terminal with excellent VT/ANSI support that has
+// no trouble with other full-screen tools. That points to a real bug in
+// this project's own pause/resume handling around shelled-out commands
+// (winget, npm, the Shopify CLI, ...) rather than a terminal capability
+// gap — one that isn't practical to chase blind without a live terminal to
+// reproduce against. Rather than risk shipping a screen that actively
+// looks broken to everyone by default, the classic plain-text wizard —
+// fully reliable, just less flashy — is the default everywhere until the
+// TUI's rendering is actually fixed and verified. The TUI code is left in
+// place for anyone who wants to try it or help debug it.
 async function main() {
-  if (forceCli) {
+  if (forceCli || !forceTui) {
     return runClassic();
   }
-  if (forceTui || canUseTui) {
-    try {
-      const { runTui } = require('./tui/app');
-      await runTui(steps);
-      return;
-    } catch (err) {
-      console.error('Could not start the terminal UI (' + (err.message || err) + ').');
-      console.error('Continuing in plain text mode instead...\n');
-      // fall through to the classic CLI below
-    }
+  try {
+    const { runTui } = require('./tui/app');
+    await runTui(steps);
+    return;
+  } catch (err) {
+    console.error('Could not start the terminal UI (' + (err.message || err) + ').');
+    console.error('Continuing in plain text mode instead...\n');
+    // fall through to the classic CLI below
   }
   return runClassic();
 }
