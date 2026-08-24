@@ -1,6 +1,7 @@
 'use strict';
 
 const { runStep, refreshWindowsPath } = require('./utils');
+const { isWindows } = require('./platform');
 
 // Make sure we start with the freshest possible view of PATH — the
 // bootstrap script already does this before handing off, but this covers
@@ -46,13 +47,30 @@ const args = process.argv.slice(2);
 const forceCli = args.includes('--cli');
 const forceTui = args.includes('--tui') || args.includes('--gui');
 
+// On Windows specifically, the legacy "Windows PowerShell" console host
+// (conhost.exe — the classic blue window launched from the Start Menu,
+// distinct from the separate Windows Terminal app) only partially supports
+// the full-screen VT/ANSI rendering blessed relies on. In testing it showed
+// up as genuinely corrupted, overlapping text — not a cosmetic quibble, an
+// actively broken-looking screen — while the identical UI renders cleanly
+// in Windows Terminal or VS Code's integrated terminal. A broken-looking
+// GUI is worse than no GUI, so only offer the TUI there when there's a
+// positive signal the terminal is one known to render it well.
+function isModernTerminal() {
+  if (!isWindows) return true; // macOS/Linux terminal emulators are reliably fine
+  if (process.env.WT_SESSION) return true; // Windows Terminal
+  if (process.env.TERM_PROGRAM === 'vscode') return true; // VS Code's integrated terminal
+  return false;
+}
+
 // Default to the terminal UI whenever we're actually attached to a real
 // interactive terminal (both stdin and stdout — a TUI needs to read
-// keystrokes AND draw a full screen). Falls back to the classic prompt-driven
-// CLI for CI, piped output, `--cli`, or if blessed can't start for any
-// reason at all — automatically, not as a manual step someone has to
+// keystrokes AND draw a full screen) that's also known to render it well.
+// Falls back to the classic prompt-driven CLI for CI, piped output,
+// `--cli`, an unsupported Windows console, or if blessed can't start for
+// any reason at all — automatically, not as a manual step someone has to
 // remember to run.
-const canUseTui = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
+const canUseTui = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY) && isModernTerminal();
 
 async function main() {
   if (forceCli) {

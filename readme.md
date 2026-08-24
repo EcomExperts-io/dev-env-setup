@@ -127,19 +127,29 @@ everything else.
 
 ### Terminal UI
 
-When you run it in a real terminal (any normal Terminal/PowerShell/Windows
-Terminal window), it opens a full-screen, keyboard-driven UI right there in
-the terminal — a checklist of what to set up (↑/↓ to move, Space to
-toggle, Enter to start), then a live sidebar + scrolling log while it runs,
-same idea as tools like Chris Titus's WinUtil, just running inside your
-terminal instead of a separate window. Any question the setup needs to ask
-(your Git email, whether to install Oh My Zsh, ...) pops up as a small box
-right there rather than interrupting the log.
+When you run it in a terminal that renders it well, it opens a full-screen,
+keyboard-driven UI right there in the terminal — a checklist of what to set
+up (↑/↓ to move, Space to toggle, Enter to start), then a live sidebar +
+scrolling log while it runs, same idea as tools like Chris Titus's WinUtil,
+just running inside your terminal instead of a separate window. Any
+question the setup needs to ask (your Git email, whether to install Oh My
+Zsh, ...) pops up as a small box right there rather than interrupting the
+log.
 
-If your terminal can't support that (piped output, some CI runners, or the
-one small UI dependency couldn't be installed automatically), it falls back
-on its own to the classic plain-text, line-by-line wizard — nothing to do
-on your end, it just works either way. You can also choose explicitly:
+On macOS/Linux, any normal terminal works. On Windows, this needs Windows
+Terminal or VS Code's integrated terminal — the classic "Windows
+PowerShell" console app (the blue window launched straight from the Start
+Menu, as opposed to Windows Terminal) doesn't render it cleanly, so the
+tool detects that and automatically uses the classic plain-text wizard
+there instead of showing a broken-looking screen. Windows Terminal comes
+pre-installed on Windows 11 and is a free Microsoft Store install on
+Windows 10, and is worth having anyway.
+
+If your terminal can't support the full UI for any other reason either
+(piped output, some CI runners, or the one small UI dependency couldn't be
+installed automatically), it falls back on its own to the classic
+plain-text, line-by-line wizard — nothing to do on your end, it just works
+either way. You can also choose explicitly:
 
 ```bash
 node bin/setup.js --tui   # force the terminal UI
