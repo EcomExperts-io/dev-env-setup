@@ -31,6 +31,94 @@ REPO_REF="${EE_SETUP_REF:-Main}"
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
 info() { printf "  %s\n" "$1"; }
 
+# Last-resort Node.js install for Linux: no root, no package manager, no
+# compiling — just Node's own official prebuilt binary tarball extracted
+# somewhere user-writable. This exists because the package-manager route
+# above can fail for reasons that have nothing to do with Node itself and
+# nothing this script can fix: an immutable/read-only root filesystem (e.g.
+# SteamOS, whose pacman isn't set up for general package installation the
+# way a normal Arch install's is — "failed to synchronize all databases" is
+# its usual symptom), no sudo access, a stale/misconfigured mirror, being
+# fully offline from the distro's own repos, or simply no supported package
+# manager being present at all. Node publishes ready-to-run x64/arm64
+# tarballs for exactly this kind of situation, so falling back to one
+# avoids getting stuck asking for a manual install over what's usually a
+# purely local/environmental package-manager problem.
+install_node_from_official_tarball() {
+  local arch node_arch version url install_dir tmp_tarball rc_file
+
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64) node_arch="x64" ;;
+    aarch64|arm64) node_arch="arm64" ;;
+    *)
+      info "No prebuilt Node.js binary available for this CPU architecture ($arch)."
+      return 1
+      ;;
+  esac
+
+  info "Looking up the current Node.js LTS version..."
+  # index.json lists newest-first; the first entry whose "lts" field isn't
+  # the literal `false` is the current LTS release. Deliberately avoids
+  # needing jq/python here (neither is guaranteed to exist yet at this
+  # point) — splitting on the literal sequence "},{" (which only appears at
+  # real object boundaries between array elements, never inside a single
+  # release's own fields) turns the single-line JSON array into one release
+  # per line, plain enough for grep/sed to pick apart. (`tr` can't do this:
+  # it maps characters position-by-position, not multi-character sequences
+  # — it would split on every single comma, including ones inside a
+  # release's own "files" array, which is not what's wanted here.)
+  version="$(curl -fsSL https://nodejs.org/dist/index.json 2>/dev/null \
+    | sed 's/},{/}\n{/g' \
+    | grep '"lts":"' \
+    | head -1 \
+    | grep -o '"version":"[^"]*"' \
+    | cut -d'"' -f4)"
+  if [ -z "$version" ]; then
+    info "Could not determine the current Node.js LTS version (network issue reaching nodejs.org?)."
+    return 1
+  fi
+
+  url="https://nodejs.org/dist/${version}/node-${version}-linux-${node_arch}.tar.gz"
+  install_dir="$HOME/.ee-dev-setup/node-${version}"
+  info "Downloading Node.js ${version} for linux-${node_arch}..."
+  tmp_tarball="$(mktemp)"
+  if ! curl -fsSL "$url" -o "$tmp_tarball"; then
+    info "Download failed: $url"
+    rm -f "$tmp_tarball"
+    return 1
+  fi
+  mkdir -p "$install_dir"
+  if ! tar -xzf "$tmp_tarball" -C "$install_dir" --strip-components=1; then
+    info "Could not extract the downloaded Node.js archive."
+    rm -f "$tmp_tarball"
+    return 1
+  fi
+  rm -f "$tmp_tarball"
+
+  export PATH="$install_dir/bin:$PATH"
+  if ! command -v node >/dev/null 2>&1; then
+    info "Extracted Node.js but couldn't find it on PATH afterward — something's off with the archive layout."
+    return 1
+  fi
+
+  # Make this stick for future terminal sessions too, not just this run.
+  local marker="# Added by EcomExperts dev-setup — Node.js (official tarball fallback)"
+  for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [ -f "$rc_file" ] || continue
+    if ! grep -qF "$marker" "$rc_file" 2>/dev/null; then
+      {
+        echo ""
+        echo "$marker"
+        echo "export PATH=\"$install_dir/bin:\$PATH\""
+      } >> "$rc_file"
+    fi
+  done
+
+  info "Node $(node -v) ready (installed to $install_dir, no root needed)."
+  return 0
+}
+
 bold "EcomExperts dev-setup — bootstrap"
 
 # ${BASH_SOURCE[0]:-.} (rather than a bare ${BASH_SOURCE[0]}) matters here:
@@ -72,6 +160,11 @@ if [ "$OS" = "Darwin" ]; then
 elif [ "$OS" = "Linux" ]; then
   if ! command -v node >/dev/null 2>&1; then
     info "Node.js not found — installing..."
+    # Every branch below is deliberately tolerant of its own failure (`|| true`
+    # / explicit if-checks) rather than letting `set -e` kill the whole
+    # script here — a package-manager install not working is exactly the
+    # case the official-tarball fallback further down exists to recover
+    # from, not a reason to give up and demand a manual install.
     if command -v apt-get >/dev/null 2>&1; then
       # A fresh/minimal install (e.g. a bare VM image) may not even have
       # curl yet — the NodeSource setup script below needs it, so make sure
@@ -79,24 +172,34 @@ elif [ "$OS" = "Linux" ]; then
       # deep inside a piped command.
       if ! command -v curl >/dev/null 2>&1; then
         info "curl not found — installing it first..."
-        sudo apt-get update -y
-        sudo apt-get install -y curl
+        sudo apt-get update -y || true
+        sudo apt-get install -y curl || true
       fi
-      curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-      sudo apt-get install -y nodejs
+      curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - || true
+      sudo apt-get install -y nodejs || true
     elif command -v dnf >/dev/null 2>&1; then
       if ! command -v curl >/dev/null 2>&1; then
         info "curl not found — installing it first..."
-        sudo dnf install -y curl
+        sudo dnf install -y curl || true
       fi
-      curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash -
-      sudo dnf install -y nodejs
+      curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash - || true
+      sudo dnf install -y nodejs || true
     elif command -v pacman >/dev/null 2>&1; then
-      sudo pacman -Sy --noconfirm nodejs npm
-    else
-      echo "Could not detect a supported package manager."
-      echo "Install Node.js manually from https://nodejs.org/en/download/, then re-run this script."
-      exit 1
+      sudo pacman -Sy --noconfirm nodejs npm || true
+    fi
+
+    if ! command -v node >/dev/null 2>&1; then
+      # No supported package manager was found, or the one that was there
+      # just didn't work (wrong repo state, no sudo, a read-only root
+      # filesystem, offline mirrors, ...) — either way, fall back to
+      # Node's own official prebuilt binary instead of giving up here.
+      if [ -z "$(command -v apt-get || true)$(command -v dnf || true)$(command -v pacman || true)" ]; then
+        info "Could not detect a supported package manager."
+      else
+        info "The package-manager install didn't get Node.js working."
+      fi
+      info "Falling back to Node's official prebuilt binary (no root/package manager needed)..."
+      install_node_from_official_tarball || true
     fi
   fi
 else
