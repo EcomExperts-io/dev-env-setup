@@ -8,24 +8,37 @@
 #   - From inside an already-downloaded copy of this repo (the traditional
 #     way): just run ./bootstrap.sh
 #   - As a single command, with nothing downloaded yet:
-#       curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh | bash
+#       bash <(curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh)
 #     There's no local checkout to find next to the script in that case
-#     (it's being read straight off stdin) — this script notices that and
-#     downloads one itself first (the repo is public, so no login/token is
-#     needed), then carries on exactly as it would from a real checkout.
+#     (it's being read straight from the substituted file descriptor above,
+#     not from stdin — see the note further down on why that distinction
+#     matters) — this script notices that and downloads one itself first
+#     (the repo is public, so no login/token is needed), then carries on
+#     exactly as it would from a real checkout.
+#
+#     Deliberately `bash <(curl ...)` rather than `curl ... | bash`: piping
+#     into bash makes bash's own stdin BE the script's source code, and once
+#     bash has read it all off that pipe there's nothing left in it — every
+#     later step that wants real interactive input (all the way down in the
+#     setup tool this hands off to, which needs a "Ready to start? (Y/n):"
+#     answer) would see an instant end-of-input and just quit instead of
+#     waiting for a keypress. Process substitution avoids that entirely:
+#     bash reads the script from a separate file descriptor, never touching
+#     stdin, so it stays connected to the real terminal for the tool's
+#     prompts exactly as if you'd downloaded and run this file normally.
 
 set -euo pipefail
 
 REPO_OWNER="EcomExperts-io"
 REPO_NAME="dev-env-setup"
 # Same self-download-ref override as bootstrap.ps1 (see the comment over
-# there for the full story of why this exists) — piped as
-# `curl ... | bash`, this script has no way to know which branch's raw URL
-# it was actually fetched from, so a hardcoded "Main" here would silently
+# there for the full story of why this exists) — run via process
+# substitution, this script has no way to know which branch's raw URL it
+# was actually fetched from, so a hardcoded "Main" here would silently
 # overwrite a local checkout with Main's content on every run regardless of
 # which branch's one-liner you used. Set EE_SETUP_REF to override when
 # testing a branch other than Main:
-#   EE_SETUP_REF=Develop curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh | bash
+#   EE_SETUP_REF=Develop bash <(curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh)
 REPO_REF="${EE_SETUP_REF:-Main}"
 
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
@@ -122,9 +135,13 @@ install_node_from_official_tarball() {
 bold "EcomExperts dev-setup — bootstrap"
 
 # ${BASH_SOURCE[0]:-.} (rather than a bare ${BASH_SOURCE[0]}) matters here:
-# under `set -u`, a piped `curl ... | bash` run has no real BASH_SOURCE to
-# read, and this is exactly the case that needs a default instead of
-# crashing on an unbound variable.
+# under `set -u`, a script with no real BASH_SOURCE to read (which can
+# happen depending on exactly how it's invoked) would crash on an unbound
+# variable without the default. Run via `bash <(curl ...)`, BASH_SOURCE[0]
+# actually resolves to the substituted file descriptor's path (something
+# like /dev/fd/63) rather than a real file next to a real checkout — which
+# is exactly what makes the next check below correctly decide "no local
+# copy exists yet, download one" in that case.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 
 if [ ! -f "$SCRIPT_DIR/bin/setup.js" ]; then
@@ -217,39 +234,9 @@ info "Node $(node -v) ready."
 info "Handing off to the setup tool..."
 echo ""
 
-# When this whole script is run as the piped one-liner (`curl ... | bash`),
-# THIS script's own stdin (fd 0) is the pipe carrying its own source code
-# from curl — and that's still true all the way down here. The setup tool
-# we're about to hand off to needs to prompt interactively (starting with a
-# plain "Ready to start? (Y/n):"), but a pipe that already delivered this
-# script's full source has nothing left in it, so the tool would see an
-# instant EOF on its very first prompt and quit immediately — exactly
-# "prints the prompt, then silently closes" with no chance to answer.
-#
-# The fix is to hand it a real terminal instead — but NOT by reattaching
-# stdin any earlier than this exact line. Bash reads a piped script
-# incrementally as it executes it, so redirecting fd 0 away mid-script (even
-# near the top, which is where this was first tried) cuts bash off from the
-# rest of its own source before it's finished reading it, which breaks the
-# curl|bash pipe outright (curl fails with "Failure writing output to
-# destination" as its write end slams shut mid-download). This is the last
-# couple of lines of the script, so by now bash has already read every byte
-# of its own source it's ever going to need — there is nothing left after
-# this for a fd 0 swap to interrupt, which is what makes it safe here
-# specifically and nowhere earlier.
-#
-# The redirect attempt itself is wrapped in an `if` so a failure can't crash
-# the script under `set -e` (a command tested by `if` never triggers it).
-# That matters because `-t 0` being false doesn't guarantee /dev/tty is
-# actually usable — e.g. fully detached/non-interactive runs (no controlling
-# terminal at all) can still have /dev/tty exist and pass a plain
-# readability check, yet fail to open with "No such device or address" the
-# moment something tries to actually use it. Attempting the real redirect
-# and letting it fail safely (rather than pre-checking with `-r`) covers
-# that case too: if it can't be opened, stdin is simply left as it was —
-# same (harmless, expected-to-fail-fast) behavior as before this fix —
-# instead of the whole script erroring out on the attempt.
-if [ ! -t 0 ]; then
-  exec < /dev/tty 2>/dev/null || true
-fi
+# No stdin gymnastics needed here: because this script is invoked via
+# `bash <(curl ...)` (see the note near the top of this file for why that
+# matters), stdin was never hijacked as this script's own source in the
+# first place — it's been the real terminal the whole time, so the setup
+# tool's prompts (starting with "Ready to start? (Y/n):") just work.
 exec node "$SCRIPT_DIR/bin/setup.js"
