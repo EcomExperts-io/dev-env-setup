@@ -16,26 +16,6 @@
 
 set -euo pipefail
 
-# When this is run as the piped one-liner (`curl ... | bash`), THIS script's
-# own stdin (fd 0) is the pipe carrying its own source code from curl. By the
-# time bash has finished reading the script off that pipe, there's nothing
-# left to read from it — but the file descriptor stays open, permanently at
-# EOF, and everything below inherits it, including the final `exec node ...`
-# handoff at the bottom of this file. So the very first interactive prompt
-# in the setup tool (a plain "Ready to start? (Y/n):") gets an instant EOF
-# instead of a real keypress. Node's readline, seeing input already ended
-# with nothing else keeping the process alive, just quits — which looks
-# exactly like "the prompt printed, then the whole thing silently closed."
-# Reattaching stdin to the real terminal here fixes that. Not needed (and
-# left alone) when this script is run normally, e.g. `./bootstrap.sh`, since
-# stdin is already a real tty in that case — the `-t 0` check makes this a
-# no-op then. `-r /dev/tty` guards the rare case of no controlling terminal
-# at all (e.g. `curl ... | bash < /dev/null` in a CI job), where there's
-# nothing to reattach to and this is skipped rather than erroring out.
-if [ ! -t 0 ] && [ -r /dev/tty ]; then
-  exec < /dev/tty
-fi
-
 REPO_OWNER="EcomExperts-io"
 REPO_NAME="dev-env-setup"
 # Same self-download-ref override as bootstrap.ps1 (see the comment over
@@ -237,4 +217,39 @@ info "Node $(node -v) ready."
 info "Handing off to the setup tool..."
 echo ""
 
+# When this whole script is run as the piped one-liner (`curl ... | bash`),
+# THIS script's own stdin (fd 0) is the pipe carrying its own source code
+# from curl — and that's still true all the way down here. The setup tool
+# we're about to hand off to needs to prompt interactively (starting with a
+# plain "Ready to start? (Y/n):"), but a pipe that already delivered this
+# script's full source has nothing left in it, so the tool would see an
+# instant EOF on its very first prompt and quit immediately — exactly
+# "prints the prompt, then silently closes" with no chance to answer.
+#
+# The fix is to hand it a real terminal instead — but NOT by reattaching
+# stdin any earlier than this exact line. Bash reads a piped script
+# incrementally as it executes it, so redirecting fd 0 away mid-script (even
+# near the top, which is where this was first tried) cuts bash off from the
+# rest of its own source before it's finished reading it, which breaks the
+# curl|bash pipe outright (curl fails with "Failure writing output to
+# destination" as its write end slams shut mid-download). This is the last
+# couple of lines of the script, so by now bash has already read every byte
+# of its own source it's ever going to need — there is nothing left after
+# this for a fd 0 swap to interrupt, which is what makes it safe here
+# specifically and nowhere earlier.
+#
+# The redirect attempt itself is wrapped in an `if` so a failure can't crash
+# the script under `set -e` (a command tested by `if` never triggers it).
+# That matters because `-t 0` being false doesn't guarantee /dev/tty is
+# actually usable — e.g. fully detached/non-interactive runs (no controlling
+# terminal at all) can still have /dev/tty exist and pass a plain
+# readability check, yet fail to open with "No such device or address" the
+# moment something tries to actually use it. Attempting the real redirect
+# and letting it fail safely (rather than pre-checking with `-r`) covers
+# that case too: if it can't be opened, stdin is simply left as it was —
+# same (harmless, expected-to-fail-fast) behavior as before this fix —
+# instead of the whole script erroring out on the attempt.
+if [ ! -t 0 ]; then
+  exec < /dev/tty 2>/dev/null || true
+fi
 exec node "$SCRIPT_DIR/bin/setup.js"
