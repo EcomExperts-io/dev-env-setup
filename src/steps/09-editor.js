@@ -14,6 +14,8 @@ const {
   ensureWinget,
   downloadFile,
   fetchJson,
+  findAptPackageDownloadUrl,
+  installDebPackagePortable,
   runInstaller,
   tempInstallerPath,
   refreshWindowsPath,
@@ -486,7 +488,7 @@ async function installClaudeDesktopWindows() {
   }
 }
  
-async function installClaudeDesktopLinux() {
+async function installClaudeDesktopLinuxApt() {
   if (!commandExists('apt-get')) return { success: false };
   ensureCurlOnLinux();
  
@@ -514,6 +516,52 @@ async function installClaudeDesktopLinux() {
   run('sudo apt update');
   const installResult = run('sudo apt install -y claude-desktop');
   return { success: installResult.success && commandExists('claude-desktop') };
+}
+ 
+// Last-resort Claude desktop install for Linux: no apt/dpkg needed. Only an
+// apt repo is officially published for Linux — no AppImage/tarball the way
+// VS Code and Cursor offer — which is a dead end on a distro that has no
+// working apt (SteamOS's locked-down pacman being the concrete case, but
+// this applies to any non-Debian-family Linux). A .deb is just a plain
+// archive, though, so installDebPackagePortable pulls it apart directly:
+// looks up the exact current package from the same apt repo's own
+// Packages index (a plain HTTPS GET, no apt involved), downloads the
+// .deb, and extracts + wires it up without dpkg ever running.
+async function installClaudeDesktopLinuxPortable() {
+  try {
+    info('Looking up the current Claude desktop package (no apt needed)...');
+    const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+    const pkg = await findAptPackageDownloadUrl({
+      repoBaseUrl: 'https://downloads.claude.ai/claude-desktop/apt/stable',
+      suite: 'stable',
+      component: 'main',
+      arch,
+      packageName: 'claude-desktop',
+    });
+    if (!pkg) throw new Error('claude-desktop package not found in the repo\'s own Packages index');
+ 
+    info(`Downloading Claude desktop ${pkg.version || ''}...`);
+    const dest = tempInstallerPath('claude-desktop.deb');
+    await downloadFile(pkg.url, dest);
+ 
+    info('Extracting (no dpkg/apt needed)...');
+    const result = await installDebPackagePortable({ debPath: dest, installDirName: 'claude-desktop' });
+    return { success: result.success && commandExists(result.command) };
+  } catch (err) {
+    warn(`Package-manager-free install failed: ${err.message || err}`);
+    return { success: false };
+  }
+}
+ 
+async function installClaudeDesktopLinux() {
+  const aptResult = await installClaudeDesktopLinuxApt();
+  if (aptResult.success) return aptResult;
+  if (commandExists('apt-get')) {
+    warn('The apt install didn\'t get the Claude desktop app working — trying another way.');
+  } else {
+    info('No apt-get on this system — trying a package-manager-free install instead...');
+  }
+  return installClaudeDesktopLinuxPortable();
 }
  
 async function installClaudeDesktop() {

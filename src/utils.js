@@ -1,16 +1,17 @@
 'use strict';
-
+ 
 const { execSync, spawnSync, spawn } = require('child_process');
 const readline = require('readline');
 const https = require('https');
+const zlib = require('zlib');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const c = require('./colors');
-
+ 
 const isWindows = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
-
+ 
 // ---------------------------------------------------------------------------
 // Open a URL in the default browser
 // ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ function openUrl(url) {
   else if (isWindows) run(`Start-Process "${url}"`, { silent: true });
   else run(`xdg-open "${url}" 2>/dev/null`, { silent: true });
 }
-
+ 
 // ---------------------------------------------------------------------------
 // Windows PATH refresh
 // ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ function refreshWindowsPath() {
     // Best-effort — worst case, a check runs against a slightly stale PATH.
   }
 }
-
+ 
 // Add a directory to the persistent Windows User PATH (registry) — needed
 // for anything that must be found by a *future* PowerShell/cmd session,
 // since editing process.env.PATH only ever affects this one Node process.
@@ -82,7 +83,7 @@ function addDirToWindowsPath(dir) {
   const result = run(psCommand, { silent: true });
   return result.success;
 }
-
+ 
 // macOS/Linux counterpart to addDirToWindowsPath. A fresh terminal window
 // only re-sources ~/.bashrc, not ~/.profile — and it's ~/.profile (on most
 // distros) that conditionally adds ~/.local/bin to PATH, and only if that
@@ -125,15 +126,15 @@ function addDirToUnixPath(dir) {
   }
   return true;
 }
-
+ 
 // ---------------------------------------------------------------------------
 // Logging & prompts
 // ---------------------------------------------------------------------------
-
+ 
 function makeRl() {
   return readline.createInterface({ input: process.stdin, output: process.stdout });
 }
-
+ 
 function ask(question, { defaultValue, validate } = {}) {
   return new Promise((resolve) => {
     const rl = makeRl();
@@ -155,46 +156,46 @@ function ask(question, { defaultValue, validate } = {}) {
     doAsk();
   });
 }
-
+ 
 async function confirm(question, defaultYes = true) {
   const hint = defaultYes ? 'Y/n' : 'y/N';
   const answer = await ask(`${question} (${hint})`, {});
   if (!answer) return defaultYes;
   return /^y(es)?$/i.test(answer.trim());
 }
-
+ 
 function log(msg = '') {
   console.log(msg);
 }
-
+ 
 function heading(msg) {
   console.log('\n' + c.bold(c.cyan(`▸ ${msg}`)));
 }
-
+ 
 function ok(msg) {
   console.log(c.green('  ✔ ') + msg);
 }
-
+ 
 function skip(msg) {
   console.log(c.gray('  – ') + c.gray(msg));
 }
-
+ 
 function warn(msg) {
   console.log(c.yellow('  ! ') + msg);
 }
-
+ 
 function fail(msg) {
   console.log(c.red('  ✘ ') + msg);
 }
-
+ 
 function info(msg) {
   console.log(c.dim('  ' + msg));
 }
-
+ 
 // ---------------------------------------------------------------------------
 // Shell execution
 // ---------------------------------------------------------------------------
-
+ 
 // On Windows, several real commands this tool runs (npm, npx, RubyInstaller's
 // ridk) ship a .cmd file alongside a .ps1 shim of the same name — and
 // PowerShell's own bare-name command resolution prefers the .ps1 over the
@@ -219,7 +220,7 @@ function forceCmdShims(cmd) {
   // "...\.npm-global" or "...\npm.cmd", which must be left untouched.
   return cmd.replace(/(^|[\s;&|(])(npm|npx|ridk)(?=[\s"']|$)(?!\.(?:cmd|ps1|exe))/gi, '$1$2.cmd');
 }
-
+ 
 /**
  * Run a command, streaming stdio to the terminal. Returns true on success,
  * false on non-zero exit (never throws) unless opts.throwOnError is true.
@@ -241,7 +242,7 @@ function run(cmd, opts = {}) {
     //     showing its real output (unlike opts.silent, which hides output).
     const usingAutoConfirm = typeof opts.autoConfirmInput === 'string';
     const stdio = usingAutoConfirm ? ['pipe', 'inherit', 'inherit'] : opts.silent ? 'pipe' : 'inherit';
-
+ 
     const result = spawnSync(shell, shellArgs, {
       stdio,
       input: usingAutoConfirm ? opts.autoConfirmInput : undefined,
@@ -272,7 +273,7 @@ function run(cmd, opts = {}) {
     return { success: false, status: -1, error: err };
   }
 }
-
+ 
 /**
  * Like run(), but for a command that isn't waiting on a person — something
  * fully unattended (no ask()/prompt in play) that can still occasionally
@@ -313,13 +314,13 @@ function runWithTimeoutRetry(cmd, opts = {}) {
   const maxAttempts = opts.maxAttempts || 3;
   const usingAutoConfirm = typeof opts.autoConfirmInput === 'string';
   const captureOutput = !!opts.silent && !usingAutoConfirm;
-
+ 
   const shell = isWindows ? 'powershell.exe' : '/bin/bash';
   const shellArgs = isWindows
     ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', forceCmdShims(cmd)]
     : ['-c', cmd];
   const stdio = usingAutoConfirm ? ['pipe', 'inherit', 'inherit'] : captureOutput ? ['ignore', 'pipe', 'pipe'] : 'inherit';
-
+ 
   function killTree(pid) {
     if (isWindows) {
       spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
@@ -335,25 +336,25 @@ function runWithTimeoutRetry(cmd, opts = {}) {
       }
     }
   }
-
+ 
   return new Promise((resolve) => {
     const runAttempt = (attemptNum) => {
       if (attemptNum > 1) {
         warn(`Still stuck after ${Math.round(timeoutMs / 60000)} min with no response — killing the whole process tree and trying again (attempt ${attemptNum}/${maxAttempts})...`);
       }
-
+ 
       let settled = false;
       let stalledThisAttempt = false;
       let stdout = '';
       let stderr = '';
-
+ 
       const child = spawn(shell, shellArgs, {
         stdio,
         cwd: opts.cwd,
         env: { ...process.env, ...(opts.env || {}) },
         detached: !isWindows,
       });
-
+ 
       if (captureOutput) {
         if (child.stdout) child.stdout.on('data', (d) => (stdout += d));
         if (child.stderr) child.stderr.on('data', (d) => (stderr += d));
@@ -362,19 +363,19 @@ function runWithTimeoutRetry(cmd, opts = {}) {
         child.stdin.write(opts.autoConfirmInput);
         child.stdin.end();
       }
-
+ 
       const timer = setTimeout(() => {
         stalledThisAttempt = true;
         killTree(child.pid);
       }, timeoutMs);
-
+ 
       child.on('error', (err) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         resolve({ success: false, status: -1, error: err });
       });
-
+ 
       child.on('exit', (code) => {
         if (settled) return;
         settled = true;
@@ -391,11 +392,11 @@ function runWithTimeoutRetry(cmd, opts = {}) {
         resolve({ success: code === 0, status: code, stdout, stderr });
       });
     };
-
+ 
     runAttempt(1);
   });
 }
-
+ 
 /**
  * Run a command by invoking the executable directly with an argv array —
  * no shell in between. This matters on Windows specifically: PowerShell's
@@ -420,7 +421,7 @@ function runDirect(command, args = [], opts = {}) {
     return { success: false, error: err };
   }
 }
-
+ 
 /** Run a command and capture stdout quietly (no streaming). */
 function capture(cmd, opts = {}) {
   try {
@@ -435,7 +436,7 @@ function capture(cmd, opts = {}) {
     return null;
   }
 }
-
+ 
 /** Check whether a CLI command/binary is available on PATH. */
 function commandExists(cmd) {
   if (isWindows) {
@@ -457,7 +458,7 @@ function commandExists(cmd) {
   });
   return result.status === 0 && result.stdout.trim().length > 0;
 }
-
+ 
 // Every Windows step that installs something (Git, Ruby, VS Code, Cursor,
 // the Claude desktop app, Slack) tries winget first, because a winget
 // package is independently validated by winget-pkgs' own CI to actually
@@ -478,13 +479,13 @@ function commandExists(cmd) {
 // everything after it just sees winget already there (or already given up
 // on, if it genuinely isn't reachable on this machine/network).
 let wingetBootstrapAttempted = false;
-
+ 
 function ensureWinget() {
   if (!isWindows) return false;
   if (commandExists('winget')) return true;
   if (wingetBootstrapAttempted) return commandExists('winget');
   wingetBootstrapAttempted = true;
-
+ 
   // This whole attempt is a nice-to-have, not something any step actually
   // depends on — every caller already has its own fallback for winget being
   // unavailable (a direct-download install, or in Slack's case, opening the
@@ -494,7 +495,7 @@ function ensureWinget() {
   // handle it, never take down the rest of the tool with it.
   try {
     info('winget isn\'t available on this machine — bootstrapping it via Microsoft\'s official WinGet PowerShell module (no Microsoft Store needed)...');
-
+ 
     // Building blocks shared by both attempts below.
     //  - Trusting PSGallery up front avoids Install-Module's "Untrusted
     //    repository, are you sure? [Y/N]" confirmation — without this, that
@@ -522,7 +523,7 @@ function ensureWinget() {
         '  Write-Warning $_.Exception.Message',
         '}',
       ].join('\n');
-
+ 
     // Try the all-users (machine-wide) install first — needs this process
     // to already be elevated, which it normally is by the time a Windows
     // step gets this far. A shorter, bounded timeout here on purpose: this
@@ -530,14 +531,14 @@ function ensureWinget() {
     // something about this specific machine/network makes it hang.
     run(scriptFor('AllUsers'), { timeoutMs: 3 * 60 * 1000 });
     refreshWindowsPath();
-
+ 
     if (!commandExists('winget')) {
       // Not elevated (or the machine-wide attempt otherwise failed) — retry
       // entirely per-user, which needs no admin rights at all.
       run(scriptFor('CurrentUser'), { timeoutMs: 3 * 60 * 1000 });
       refreshWindowsPath();
     }
-
+ 
     if (commandExists('winget')) {
       ok('winget is now available.');
       return true;
@@ -549,7 +550,7 @@ function ensureWinget() {
     return false;
   }
 }
-
+ 
 // A fresh/minimal Linux install (a bare VM image, for instance) may not
 // have curl preinstalled at all — bootstrap.sh now handles that for the
 // Node.js install itself, but several later steps (Claude Code CLI, Oh My
@@ -575,7 +576,7 @@ function ensureCurlOnLinux() {
   // If none of the above matched (or the install failed), the caller's own
   // curl command will fail with its own clear error — nothing more to do.
 }
-
+ 
 // Node installed via a system package manager (NodeSource's apt/dnf setup,
 // or the distro's own `nodejs` package) puts npm's global install directory
 // somewhere root-owned (typically /usr/lib/node_modules) — so a plain
@@ -589,18 +590,18 @@ function ensureCurlOnLinux() {
 function ensureUserWritableNpmGlobal() {
   if (isWindows) return { changed: false }; // npm's default global dir on Windows is already per-user
   if (!commandExists('npm')) return { changed: false };
-
+ 
   const currentPrefix = capture('npm config get prefix') || '';
   const home = os.homedir();
   if (currentPrefix.startsWith(home)) return { changed: false }; // already user-owned
-
+ 
   try {
     fs.accessSync(currentPrefix, fs.constants.W_OK);
     return { changed: false }; // current prefix is writable as-is
   } catch {
     // not writable — the classic "system Node, root-owned global dir" case
   }
-
+ 
   const newPrefix = path.join(home, '.npm-global');
   const binDir = path.join(newPrefix, 'bin');
   try {
@@ -610,12 +611,12 @@ function ensureUserWritableNpmGlobal() {
   }
   const setResult = run(`npm config set prefix "${newPrefix}"`, { silent: true });
   if (!setResult.success) return { changed: false };
-
+ 
   // Make it usable immediately in this same process, not just future shells.
   if (!process.env.PATH.split(path.delimiter).includes(binDir)) {
     process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   }
-
+ 
   // Persist it for future terminals too.
   const marker = '# Added by EcomExperts dev-setup — user-writable npm global prefix';
   const exportLine = `export PATH="${binDir}:$PATH"`;
@@ -639,10 +640,10 @@ function ensureUserWritableNpmGlobal() {
       // best-effort — the current process still has it on PATH either way
     }
   }
-
+ 
   return { changed: true, binDir };
 }
-
+ 
 // ---------------------------------------------------------------------------
 // Direct downloads (fallback path when a package manager is unreliable)
 // ---------------------------------------------------------------------------
@@ -654,7 +655,7 @@ function ensureUserWritableNpmGlobal() {
 // downloading the vendor's own installer directly and running it with its
 // documented silent-install flags — the same approach winget itself uses
 // under the hood, minus the extra layer that was misbehaving.
-
+ 
 /** Download a URL to a local file, following redirects. Returns the path. */
 function downloadFile(url, destPath, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
@@ -677,7 +678,7 @@ function downloadFile(url, destPath, redirectsLeft = 5) {
     request.setTimeout(60000, () => request.destroy(new Error('Download timed out')));
   });
 }
-
+ 
 /** Fetch and JSON-parse a URL, following redirects (e.g. GitHub's releases API). */
 function fetchJson(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
@@ -705,7 +706,195 @@ function fetchJson(url, redirectsLeft = 5) {
     request.setTimeout(30000, () => request.destroy(new Error('Request timed out')));
   });
 }
-
+ 
+/** Fetch a URL and resolve with the raw response body as a Buffer, following redirects. */
+function fetchBuffer(url, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    if (redirectsLeft < 0) return reject(new Error('Too many redirects'));
+    const request = https.get(url, { headers: { 'User-Agent': 'ecomexperts-dev-setup' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return resolve(fetchBuffer(res.headers.location, redirectsLeft - 1));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    });
+    request.on('error', reject);
+    request.setTimeout(30000, () => request.destroy(new Error('Request timed out')));
+  });
+}
+ 
+// ---------------------------------------------------------------------------
+// Installing straight from a plain Debian apt repo, without apt or dpkg
+// ---------------------------------------------------------------------------
+//
+// A few tools (Slack, the Claude desktop app) only publish official Linux
+// builds through a package manager (apt repo, snap) — no plain "download
+// and run" tarball/AppImage the way VS Code and Cursor do. That's a real
+// dead end on a distro whose package manager isn't usable for general
+// installs (SteamOS's pacman being the concrete case this exists for — see
+// the matching note in bootstrap.sh — but the same applies to any Linux
+// without a working apt/snap). Since a .deb is just a plain archive (an
+// `ar` file containing a data.tar.* with the actual files, standard Debian
+// binary package format, nothing proprietary), it can be pulled apart and
+// installed into a normal user-writable location without dpkg or apt ever
+// being involved — the same idea as the Node.js/VS Code tarball fallbacks,
+// just with an extra unwrapping step first.
+ 
+function maybeGunzip(buf) {
+  // gzip magic bytes (0x1f 0x8b) — Packages indexes are almost always
+  // served gzip-compressed (Packages.gz); this makes decompression
+  // transparent regardless of which variant a given repo actually returns.
+  if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) return zlib.gunzipSync(buf);
+  return buf;
+}
+ 
+/**
+ * Look up a package's exact current download path from a standard Debian
+ * repository's Packages index — a plain HTTPS GET, no apt/dpkg needed.
+ * `repoBaseUrl` is the URL as it appears in a sources.list line, before the
+ * trailing " <suite> <component>" — e.g. for
+ * "deb [...] https://downloads.claude.ai/claude-desktop/apt/stable stable main"
+ * that's "https://downloads.claude.ai/claude-desktop/apt/stable".
+ */
+async function findAptPackageDownloadUrl({ repoBaseUrl, suite, component, arch, packageName }) {
+  const base = `${repoBaseUrl}/dists/${suite}/${component}/binary-${arch}`;
+  let raw;
+  try {
+    raw = maybeGunzip(await fetchBuffer(`${base}/Packages.gz`));
+  } catch {
+    raw = maybeGunzip(await fetchBuffer(`${base}/Packages`));
+  }
+  const text = raw.toString('utf8');
+  // Packages files are a sequence of deb822 stanzas separated by a blank
+  // line — split on that, then find the stanza for our package by name.
+  const stanzas = text.split(/\n\s*\n/);
+  for (const stanza of stanzas) {
+    const nameMatch = stanza.match(/^Package:\s*(.+)$/m);
+    if (!nameMatch || nameMatch[1].trim() !== packageName) continue;
+    const filenameMatch = stanza.match(/^Filename:\s*(.+)$/m);
+    if (!filenameMatch) continue;
+    const versionMatch = stanza.match(/^Version:\s*(.+)$/m);
+    return {
+      url: `${repoBaseUrl}/${filenameMatch[1].trim()}`,
+      version: versionMatch ? versionMatch[1].trim() : null,
+    };
+  }
+  return null;
+}
+ 
+/**
+ * Pull one member out of a plain Unix `ar` archive — the container format
+ * .deb files use — without needing the `ar` binary installed (not a safe
+ * assumption on a minimal/locked-down distro). Just enough of the format to
+ * find a member by name prefix and return its raw bytes: an 8-byte magic
+ * header, then repeated 60-byte member headers (name, mtime, uid, gid,
+ * mode, size, end-marker) each followed by that many bytes of data, padded
+ * to an even offset.
+ */
+function extractArMember(arFilePath, nameStartsWith) {
+  const buf = fs.readFileSync(arFilePath);
+  const MAGIC = '!<arch>\n';
+  if (buf.toString('binary', 0, MAGIC.length) !== MAGIC) {
+    throw new Error(`${arFilePath} doesn't look like a valid ar archive (bad magic)`);
+  }
+  let offset = MAGIC.length;
+  while (offset + 60 <= buf.length) {
+    const header = buf.toString('binary', offset, offset + 60);
+    const name = header.slice(0, 16).trim().replace(/\/$/, '');
+    const size = parseInt(header.slice(48, 58).trim(), 10);
+    if (!Number.isFinite(size)) break; // corrupt/unexpected — bail rather than loop forever
+    const dataStart = offset + 60;
+    if (name.startsWith(nameStartsWith)) {
+      return buf.subarray(dataStart, dataStart + size);
+    }
+    offset = dataStart + size + (size % 2); // members are 2-byte aligned
+  }
+  return null;
+}
+ 
+/**
+ * Install a .deb package's payload into a private, user-writable location
+ * — no dpkg/apt involved at all. Extracts the package's full data.tar.*
+ * tree, then finds the .desktop entry it ships to discover the actual
+ * command it wants to run and its icon (far more reliable than guessing
+ * each vendor's internal layout — e.g. whether the real binary lives under
+ * /usr/bin or /usr/lib/<name>/ — by hand), and wires up a wrapper on PATH
+ * plus a corrected desktop entry pointing at the extracted files.
+ */
+async function installDebPackagePortable({ debPath, installDirName }) {
+  const dataMember = extractArMember(debPath, 'data.tar');
+  if (!dataMember) throw new Error('Could not find a data.tar.* member inside the .deb — unexpected package format');
+ 
+  const rootDir = path.join(os.homedir(), '.local', 'share', 'ecomexperts-dev-setup', installDirName, 'root');
+  fs.mkdirSync(rootDir, { recursive: true });
+  const dataTarPath = tempInstallerPath(`${installDirName}-data.tar`);
+  fs.writeFileSync(dataTarPath, dataMember);
+ 
+  // tar autodetects gzip/xz/zstd compression from the file itself, so this
+  // works regardless of which one dpkg used for this particular package.
+  const extractResult = run(`tar -xf "${dataTarPath}" -C "${rootDir}"`, { silent: true });
+  if (!extractResult.success) throw new Error('Could not extract the package payload (data.tar.*) — tar failed');
+ 
+  const desktopSearch = run(
+    `find "${rootDir}/usr/share/applications" -maxdepth 1 -name '*.desktop' 2>/dev/null | head -1`,
+    { silent: true }
+  );
+  const desktopFilePath = (desktopSearch.stdout || '').trim();
+  if (!desktopFilePath || !fs.existsSync(desktopFilePath)) {
+    throw new Error('Extracted the package but could not find its .desktop entry to determine how to run it');
+  }
+  const desktopContent = fs.readFileSync(desktopFilePath, 'utf8');
+  const execMatch = desktopContent.match(/^Exec=(.+)$/m);
+  if (!execMatch) throw new Error("The package's .desktop entry has no Exec= line");
+ 
+  // Exec= lines look like "/usr/bin/slack %U" or "slack-desktop %U" — take
+  // just the command token (first word) and its bare filename; the actual
+  // binary is somewhere under the extracted tree (often a symlink chain
+  // from /usr/bin/<name> into /usr/lib/<name>/<name>), which a plain
+  // recursive search for that exact filename finds either way, without
+  // needing to know this vendor's specific internal layout in advance.
+  const execCommand = execMatch[1].trim().split(/\s+/)[0].replace(/^"|"$/g, '');
+  const execBaseName = path.basename(execCommand);
+ 
+  // -type f matters here: a plain name search also matches the containing
+  // directory itself when a vendor lays things out as /usr/lib/<name>/<name>
+  // (both share the basename), and would wrongly "find" that directory
+  // instead of the actual executable inside it. Restricting to regular
+  // files skips both that and any symlink whose target (often an absolute
+  // "/usr/lib/..." path baked in at package-build time) wouldn't resolve
+  // correctly from inside our own private extraction root anyway.
+  const findBinary = run(`find "${rootDir}" -type f -name "${execBaseName}" 2>/dev/null | head -1`, { silent: true });
+  const realBinaryPath = (findBinary.stdout || '').trim();
+  if (!realBinaryPath || !fs.existsSync(realBinaryPath)) {
+    throw new Error(`Extracted the package but couldn't locate its "${execBaseName}" executable inside it`);
+  }
+  fs.chmodSync(realBinaryPath, 0o755);
+ 
+  const wrapperDir = path.join(os.homedir(), '.local', 'bin');
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  const wrapperPath = path.join(wrapperDir, execBaseName);
+  fs.writeFileSync(wrapperPath, `#!/bin/sh\nexec "${realBinaryPath}" "$@"\n`);
+  fs.chmodSync(wrapperPath, 0o755);
+  addDirToUnixPath(wrapperDir);
+ 
+  const desktopEntryDir = path.join(os.homedir(), '.local', 'share', 'applications');
+  fs.mkdirSync(desktopEntryDir, { recursive: true });
+  const rewrittenDesktop = desktopContent
+    .replace(/^Exec=.*$/m, `Exec="${wrapperPath}" %U`)
+    .replace(/^TryExec=.*$/m, `TryExec=${wrapperPath}`);
+  fs.writeFileSync(path.join(desktopEntryDir, `${installDirName}.desktop`), rewrittenDesktop);
+  run(`update-desktop-database "${desktopEntryDir}"`, { silent: true }); // best-effort, fine if missing
+ 
+  return { success: true, command: execBaseName, binaryPath: realBinaryPath };
+}
+ 
 /** Run a downloaded installer directly (no shell layer in between) and refresh PATH after. */
 function runInstaller(exePath, args = []) {
   try {
@@ -717,12 +906,12 @@ function runInstaller(exePath, args = []) {
     return { success: false, error: err };
   }
 }
-
+ 
 /** A temp file path safe to download an installer to. */
 function tempInstallerPath(filename) {
   return path.join(os.tmpdir(), filename);
 }
-
+ 
 /**
  * git clone over SSH, without ever hitting GitHub's "are you sure you want
  * to continue connecting" host-key prompt. Without this, cloning fails
@@ -736,12 +925,12 @@ function gitCloneSsh(repoUrl, destDir, opts = {}) {
     env: { ...(opts.env || {}), GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=accept-new' },
   });
 }
-
+ 
 // ---------------------------------------------------------------------------
 // Verification loops (for steps that need a real human action — adding an
 // SSH key, completing a browser login — that no script can do on its own)
 // ---------------------------------------------------------------------------
-
+ 
 /**
  * Walks the person through a manual step, then actually verifies it worked
  * before moving on — instead of testing once, printing a warning, and
@@ -771,11 +960,11 @@ async function verifyWithRetry(opts) {
     else warn(result.message || 'That didn\'t work.');
   }
 }
-
+ 
 // ---------------------------------------------------------------------------
 // Step runner
 // ---------------------------------------------------------------------------
-
+ 
 /**
  * Runs a step function, catching errors so one failure never aborts the
  * whole run. Returns a result object used for the final summary.
@@ -791,7 +980,7 @@ async function runStep(name, fn, ctx) {
     return { name, status: 'failed', detail: err.message || String(err) };
   }
 }
-
+ 
 module.exports = {
   log,
   heading,
@@ -814,6 +1003,10 @@ module.exports = {
   ensureUserWritableNpmGlobal,
   downloadFile,
   fetchJson,
+  fetchBuffer,
+  findAptPackageDownloadUrl,
+  extractArMember,
+  installDebPackagePortable,
   runInstaller,
   tempInstallerPath,
   gitCloneSsh,
