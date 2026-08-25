@@ -16,6 +16,26 @@
 
 set -euo pipefail
 
+# When this is run as the piped one-liner (`curl ... | bash`), THIS script's
+# own stdin (fd 0) is the pipe carrying its own source code from curl. By the
+# time bash has finished reading the script off that pipe, there's nothing
+# left to read from it — but the file descriptor stays open, permanently at
+# EOF, and everything below inherits it, including the final `exec node ...`
+# handoff at the bottom of this file. So the very first interactive prompt
+# in the setup tool (a plain "Ready to start? (Y/n):") gets an instant EOF
+# instead of a real keypress. Node's readline, seeing input already ended
+# with nothing else keeping the process alive, just quits — which looks
+# exactly like "the prompt printed, then the whole thing silently closed."
+# Reattaching stdin to the real terminal here fixes that. Not needed (and
+# left alone) when this script is run normally, e.g. `./bootstrap.sh`, since
+# stdin is already a real tty in that case — the `-t 0` check makes this a
+# no-op then. `-r /dev/tty` guards the rare case of no controlling terminal
+# at all (e.g. `curl ... | bash < /dev/null` in a CI job), where there's
+# nothing to reattach to and this is skipped rather than erroring out.
+if [ ! -t 0 ] && [ -r /dev/tty ]; then
+  exec < /dev/tty
+fi
+
 REPO_OWNER="EcomExperts-io"
 REPO_NAME="dev-env-setup"
 # Same self-download-ref override as bootstrap.ps1 (see the comment over
