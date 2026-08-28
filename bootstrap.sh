@@ -26,9 +26,9 @@
 #     bash reads the script from a separate file descriptor, never touching
 #     stdin, so it stays connected to the real terminal for the tool's
 #     prompts exactly as if you'd downloaded and run this file normally.
-
+ 
 set -euo pipefail
-
+ 
 REPO_OWNER="EcomExperts-io"
 REPO_NAME="dev-env-setup"
 # Same self-download-ref override as bootstrap.ps1 (see the comment over
@@ -40,10 +40,10 @@ REPO_NAME="dev-env-setup"
 # testing a branch other than Main:
 #   EE_SETUP_REF=Develop bash <(curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh)
 REPO_REF="${EE_SETUP_REF:-Main}"
-
+ 
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
 info() { printf "  %s\n" "$1"; }
-
+ 
 # Last-resort Node.js install for Linux: no root, no package manager, no
 # compiling — just Node's own official prebuilt binary tarball extracted
 # somewhere user-writable. This exists because the package-manager route
@@ -59,7 +59,7 @@ info() { printf "  %s\n" "$1"; }
 # purely local/environmental package-manager problem.
 install_node_from_official_tarball() {
   local arch node_arch version url install_dir tmp_tarball rc_file
-
+ 
   arch="$(uname -m)"
   case "$arch" in
     x86_64) node_arch="x64" ;;
@@ -69,7 +69,7 @@ install_node_from_official_tarball() {
       return 1
       ;;
   esac
-
+ 
   info "Looking up the current Node.js LTS version..."
   # index.json lists newest-first; the first entry whose "lts" field isn't
   # the literal `false` is the current LTS release. Deliberately avoids
@@ -91,7 +91,7 @@ install_node_from_official_tarball() {
     info "Could not determine the current Node.js LTS version (network issue reaching nodejs.org?)."
     return 1
   fi
-
+ 
   url="https://nodejs.org/dist/${version}/node-${version}-linux-${node_arch}.tar.gz"
   install_dir="$HOME/.ee-dev-setup/node-${version}"
   info "Downloading Node.js ${version} for linux-${node_arch}..."
@@ -108,13 +108,13 @@ install_node_from_official_tarball() {
     return 1
   fi
   rm -f "$tmp_tarball"
-
+ 
   export PATH="$install_dir/bin:$PATH"
   if ! command -v node >/dev/null 2>&1; then
     info "Extracted Node.js but couldn't find it on PATH afterward — something's off with the archive layout."
     return 1
   fi
-
+ 
   # Make this stick for future terminal sessions too, not just this run.
   local marker="# Added by EcomExperts dev-setup — Node.js (official tarball fallback)"
   for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
@@ -127,13 +127,13 @@ install_node_from_official_tarball() {
       } >> "$rc_file"
     fi
   done
-
+ 
   info "Node $(node -v) ready (installed to $install_dir, no root needed)."
   return 0
 }
-
+ 
 bold "EcomExperts dev-setup — bootstrap"
-
+ 
 # ${BASH_SOURCE[0]:-.} (rather than a bare ${BASH_SOURCE[0]}) matters here:
 # under `set -u`, a script with no real BASH_SOURCE to read (which can
 # happen depending on exactly how it's invoked) would crash on an unbound
@@ -143,10 +143,19 @@ bold "EcomExperts dev-setup — bootstrap"
 # is exactly what makes the next check below correctly decide "no local
 # copy exists yet, download one" in that case.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
-
+ 
 if [ ! -f "$SCRIPT_DIR/bin/setup.js" ]; then
   info "No local copy of the setup tool found next to this script — downloading one..."
   INSTALL_DIR="$HOME/Documents/EcomExperts/Clients/$REPO_NAME"
+  # Wipe any previous self-download before extracting the fresh one, rather
+  # than just extracting on top of it — a plain tar extract only ever adds
+  # or overwrites files, it never removes ones that no longer exist in the
+  # new archive, so a repeated one-liner run would otherwise let stale files
+  # from an older version pile up here forever (not harmful, since nothing
+  # else uses this dedicated install path, but confusing clutter if anyone
+  # goes looking). Safe specifically because this path is this tool's own
+  # dedicated self-download location, never anything a user put there.
+  rm -rf "$INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
   tmp_tarball="$(mktemp)"
   curl -fsSL "https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_REF}.tar.gz" -o "$tmp_tarball"
@@ -155,9 +164,9 @@ if [ ! -f "$SCRIPT_DIR/bin/setup.js" ]; then
   SCRIPT_DIR="$INSTALL_DIR"
   info "Downloaded to $INSTALL_DIR"
 fi
-
+ 
 OS="$(uname -s)"
-
+ 
 if [ "$OS" = "Darwin" ]; then
   if ! command -v brew >/dev/null 2>&1; then
     info "Homebrew not found — installing it first (Node needs it on Mac)..."
@@ -169,7 +178,7 @@ if [ "$OS" = "Darwin" ]; then
       eval "$(/usr/local/bin/brew shellenv)"
     fi
   fi
-
+ 
   if ! command -v node >/dev/null 2>&1; then
     info "Node.js not found — installing via Homebrew..."
     brew install node
@@ -204,7 +213,7 @@ elif [ "$OS" = "Linux" ]; then
     elif command -v pacman >/dev/null 2>&1; then
       sudo pacman -Sy --noconfirm nodejs npm || true
     fi
-
+ 
     if ! command -v node >/dev/null 2>&1; then
       # No supported package manager was found, or the one that was there
       # just didn't work (wrong repo state, no sudo, a read-only root
@@ -223,20 +232,21 @@ else
   echo "Unsupported OS: $OS. This bootstrap supports macOS and Linux (use bootstrap.ps1 on Windows)."
   exit 1
 fi
-
+ 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js still isn't available. Install it manually from https://nodejs.org/en/download/ and re-run this script."
   exit 1
 fi
-
+ 
 info "Node $(node -v) ready."
-
+ 
 info "Handing off to the setup tool..."
 echo ""
-
+ 
 # No stdin gymnastics needed here: because this script is invoked via
 # `bash <(curl ...)` (see the note near the top of this file for why that
 # matters), stdin was never hijacked as this script's own source in the
 # first place — it's been the real terminal the whole time, so the setup
 # tool's prompts (starting with "Ready to start? (Y/n):") just work.
 exec node "$SCRIPT_DIR/bin/setup.js"
+ 
