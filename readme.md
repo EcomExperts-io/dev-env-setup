@@ -77,7 +77,7 @@ one line:
 
 **macOS / Linux:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Main/bootstrap.sh)
 ```
 
 **Windows (PowerShell):**
@@ -183,7 +183,7 @@ irm https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/boots
 ```
 
 ```bash
-EE_SETUP_REF=Develop curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh | bash
+EE_SETUP_REF=Develop bash <(curl -fsSL https://raw.githubusercontent.com/EcomExperts-io/dev-env-setup/Develop/bootstrap.sh)
 ```
 
 ## Re-running / troubleshooting a single step
